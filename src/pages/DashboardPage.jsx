@@ -1,78 +1,46 @@
 import { useMemo } from 'react';
 import StatCard from '../components/dashboard/StatCard';
-import RewardsChart from '../components/dashboard/RewardsChart';
 import MonthlyCycleChart from '../components/dashboard/MonthlyCycleChart';
 import OperatorBadge from '../components/licenses/OperatorBadge';
-import { useLicenseLabels } from '../hooks/useLicenseLabels';
-import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
-import { aggregateByCycle, getCycleInfo, microsToUsd, truncateHex } from '../utils/formatters';
-import { buildCloneIndexMap, getLicenseBackendName, getLicenseDisplayName } from '../utils/licenseDisplay';
+import { formatRewardMonthLabel, getCycleInfo, getRewardMonthKey, microsToUsd } from '../utils/formatters';
 import { Wallet, TrendingUp, Calendar, Clock, RefreshCw, Users } from 'lucide-react';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
 
 export default function DashboardPage({ api }) {
-  const { balance, licenses, allocations, summary, historyInfo, isLoading, error, refetch } = api;
+  const { balance, allocations, summary, historyInfo, isLoading, error, refetch } = api;
   const summaryData = summary?.[0] || null;
-  const { getLabel } = useLicenseLabels();
-  const { getPresetTag, presetTags } = useLicensePresetTags();
   const { getOperator, allOperators } = useOperatorTags();
   const dateRange = useDateRangeFilter(allocations, (item) => item.completedAt, 'page-state:dashboard');
   const filteredAllocations = dateRange.filtered;
-  const licenseInfoById = useMemo(
-    () => Object.fromEntries((licenses || []).map((license) => [license.id, license])),
-    [licenses]
-  );
-  const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId])),
-    [presetTags, licenseInfoById]
-  );
-
-  const rewardContributorData = useMemo(() => {
-    const byLicense = {};
-
-    (filteredAllocations || []).forEach((allocation) => {
-      const current = byLicense[allocation.licenseId] || {
-        amountMicros: 0,
-        count: 0,
-        latestDate: null,
-      };
-
-      current.amountMicros += allocation.amountMicros;
-      current.count += 1;
-
-      if (!current.latestDate || new Date(allocation.completedAt) > new Date(current.latestDate)) {
-        current.latestDate = allocation.completedAt;
-      }
-
-      byLicense[allocation.licenseId] = current;
-    });
-
-    return Object.entries(byLicense)
-      .map(([id, stats]) => ({
-        id,
-        name:
-          getLicenseDisplayName({
-            customLabel: getLabel(id),
-            backendName: getLicenseBackendName(licenseInfoById[id]),
-            presetTag: getPresetTag(id),
-            cloneIndex: cloneIndexById[id] || null,
-          }) || truncateHex(id),
-        amount: Number((stats.amountMicros / 1_000_000).toFixed(2)),
-        count: stats.count,
-        latestDate: stats.latestDate,
-      }))
-      .sort((left, right) => right.amount - left.amount);
-  }, [filteredAllocations, getLabel, getPresetTag, cloneIndexById, licenseInfoById]);
 
   const cycleData = useMemo(() => {
-    return aggregateByCycle(filteredAllocations || []).map((c) => ({
-      key: c.key,
-      label: c.label,
-      amount: Number((c.totalMicros / 1_000_000).toFixed(2)),
-      count: c.count,
-    }));
+    const byMonth = (filteredAllocations || []).reduce((map, allocation) => {
+      const key = getRewardMonthKey(allocation.completedAt);
+
+      if (!map[key]) {
+        map[key] = {
+          key,
+          label: formatRewardMonthLabel(key),
+          amountMicros: 0,
+          count: 0,
+        };
+      }
+
+      map[key].amountMicros += allocation.amountMicros;
+      map[key].count += 1;
+      return map;
+    }, {});
+
+    return Object.values(byMonth)
+      .sort((left, right) => left.key.localeCompare(right.key))
+      .map((entry) => ({
+        key: entry.key,
+        label: entry.label,
+        amount: Number((entry.amountMicros / 1_000_000).toFixed(2)),
+        count: entry.count,
+      }));
   }, [filteredAllocations]);
 
   // Operator summary: group allocations by operator with monthly cycle breakdown
@@ -232,12 +200,7 @@ export default function DashboardPage({ api }) {
       </div>
 
       <div className="glass p-3.5 sm:p-6">
-        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Contributor Snapshot</h2>
-        <RewardsChart data={rewardContributorData} />
-      </div>
-
-      <div className="glass p-3.5 sm:p-6">
-        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Monthly Reward Momentum (5th–4th Cycle)</h2>
+        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Monthly Reward Momentum</h2>
         <MonthlyCycleChart data={cycleData} />
       </div>
 

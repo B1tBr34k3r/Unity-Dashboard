@@ -29,7 +29,7 @@ import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRa
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
-import { microsToUsd, truncateHex } from '../utils/formatters';
+import { addDaysToRewardDayKey, formatRewardDayLabel, getRewardDayKey, microsToUsd, truncateHex } from '../utils/formatters';
 import {
   buildCloneIndexMap,
   getLicenseBackendName,
@@ -43,6 +43,14 @@ const STATUS_COLORS = {
   Offline: '#f59e0b',
   'Below Min': '#ef4444',
   Unbound: '#64748b',
+};
+const DATE_RANGE_LABELS = {
+  all: 'All Stored History',
+  today: 'Today',
+  '7d': 'Last 7 Days',
+  '30d': 'Last 30 Days',
+  '90d': 'Last 90 Days',
+  custom: 'Custom Range',
 };
 
 function tooltipContainer(children, label) {
@@ -219,18 +227,14 @@ function formatShareValue(value) {
   return `${value.toFixed(1)}%`;
 }
 
-function getDayLabel(dateValue) {
-  return new Date(dateValue).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
+function formatRangeDate(value) {
+  if (!value) return '—';
 
-function getDayKey(dateValue) {
-  return new Date(dateValue).toISOString().slice(0, 10);
-}
-
-function addDays(dateValue, amount) {
-  const nextDate = new Date(dateValue);
-  nextDate.setDate(nextDate.getDate() + amount);
-  return nextDate;
+  return new Date(value).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function getStatusBucket(license) {
@@ -250,12 +254,69 @@ function getStatusBucket(license) {
 }
 
 export default function AnalyticsPage({ api }) {
-  const { balance, licenses: licenseMetadata, allocations, isLoading, error, refetch } = api;
+  const { balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, refetch } = api;
   const { getLabel } = useLicenseLabels();
   const { getPresetTag, presetTags } = useLicensePresetTags();
   const { getOperator } = useOperatorTags();
   const dateRange = useDateRangeFilter(allocations || [], (item) => item.completedAt, 'page-state:analytics');
   const filteredAllocations = dateRange.filtered || [];
+
+  const activeDateRangeLabel = useMemo(() => {
+    if (dateRange.preset === 'custom') {
+      if (dateRange.customFrom && dateRange.customTo) {
+        return `${formatRangeDate(dateRange.customFrom)} -> ${formatRangeDate(dateRange.customTo)}`;
+      }
+
+      if (dateRange.customFrom) {
+        return `${formatRangeDate(dateRange.customFrom)} onward`;
+      }
+
+      if (dateRange.customTo) {
+        return `Until ${formatRangeDate(dateRange.customTo)}`;
+      }
+    }
+
+    return DATE_RANGE_LABELS[dateRange.preset] || DATE_RANGE_LABELS.all;
+  }, [dateRange.preset, dateRange.customFrom, dateRange.customTo]);
+
+  const storedHistoryLabel = useMemo(() => {
+    if (!historyInfo?.oldestCompletedAt || !historyInfo?.newestCompletedAt) {
+      return null;
+    }
+
+    return `${formatRangeDate(historyInfo.oldestCompletedAt)} -> ${formatRangeDate(historyInfo.newestCompletedAt)}`;
+  }, [historyInfo]);
+
+  const historyStatusLabel = useMemo(() => {
+    switch (historyInfo?.backfillStatus) {
+      case 'complete':
+        return 'History Synced';
+      case 'backfilling':
+        return 'Backfilling Older Rewards';
+      case 'partial':
+        return 'Partial History';
+      case 'unsupported':
+        return 'Recent History Only';
+      default:
+        return 'History Pending';
+    }
+  }, [historyInfo]);
+
+  const historyCoverageMessage = useMemo(() => {
+    if (!storedHistoryLabel) {
+      return null;
+    }
+
+    if (dateRange.preset !== 'all') {
+      return `Current view is ${activeDateRangeLabel}. Stored history already covers ${storedHistoryLabel}.`;
+    }
+
+    if (historyInfo?.backfillStatus && historyInfo.backfillStatus !== 'complete') {
+      return `Stored history currently starts ${formatRangeDate(historyInfo.oldestCompletedAt)}. Older rewards before that will not show until they are returned by the API or already cached in this browser.`;
+    }
+
+    return `Showing all stored history from ${storedHistoryLabel}.`;
+  }, [activeDateRangeLabel, dateRange.preset, historyInfo, storedHistoryLabel]);
 
   const licenseInfoById = useMemo(
     () => Object.fromEntries((licenseMetadata || []).map((license) => [license.id, license])),
@@ -381,9 +442,9 @@ export default function AnalyticsPage({ api }) {
 
   const dailyTrendData = useMemo(() => {
     const byDay = filteredAllocations.reduce((map, allocation) => {
-      const dayKey = allocation.completedAt.slice(0, 10);
+      const dayKey = getRewardDayKey(allocation.completedAt);
       if (!map[dayKey]) {
-        map[dayKey] = { dayKey, label: getDayLabel(allocation.completedAt), amount: 0, count: 0 };
+        map[dayKey] = { dayKey, label: formatRewardDayLabel(dayKey), amount: 0, count: 0 };
       }
 
       map[dayKey].amount += allocation.amountMicros / 1_000_000;
@@ -396,14 +457,13 @@ export default function AnalyticsPage({ api }) {
 
     const filledDays = [];
     const rollingWindow = [];
-    let currentDate = new Date(dayKeys[0]);
-    const lastDate = new Date(dayKeys[dayKeys.length - 1]);
+    let currentDayKey = dayKeys[0];
+    const lastDayKey = dayKeys[dayKeys.length - 1];
     let previousAmount = 0;
     let deltaIndex = 0;
 
-    while (currentDate <= lastDate) {
-      const dayKey = getDayKey(currentDate);
-      const existingDay = byDay[dayKey] || { dayKey, label: getDayLabel(currentDate), amount: 0, count: 0 };
+    while (currentDayKey <= lastDayKey) {
+      const existingDay = byDay[currentDayKey] || { dayKey: currentDayKey, label: formatRewardDayLabel(currentDayKey), amount: 0, count: 0 };
       const roundedAmount = Number(existingDay.amount.toFixed(2));
 
       rollingWindow.push(roundedAmount);
@@ -423,7 +483,7 @@ export default function AnalyticsPage({ api }) {
 
       previousAmount = roundedAmount;
       deltaIndex += 1;
-      currentDate = addDays(currentDate, 1);
+      currentDayKey = addDaysToRewardDayKey(currentDayKey, 1);
     }
 
     const peakAmount = Math.max(...filledDays.map((entry) => entry.amount));
@@ -567,47 +627,6 @@ export default function AnalyticsPage({ api }) {
       .slice(0, 8);
   }, [licenseAnalytics]);
 
-  const operatorRewardMix = useMemo(() => {
-    const grouped = licenseAnalytics.reduce((map, license) => {
-      if (license.totalMicros <= 0) {
-        return map;
-      }
-
-      const key = license.operator || 'Unassigned';
-      if (!map[key]) {
-        map[key] = { name: key, amountMicros: 0, licenseCount: 0 };
-      }
-
-      map[key].amountMicros += license.totalMicros;
-      map[key].licenseCount += 1;
-      return map;
-    }, {});
-
-    const rows = Object.values(grouped)
-      .map((entry) => ({
-        ...entry,
-        amount: Number((entry.amountMicros / 1_000_000).toFixed(2)),
-      }))
-      .sort((left, right) => right.amount - left.amount);
-
-    if (!rows.length) {
-      return { rows: [], maxAmount: 0, topOperator: null };
-    }
-
-    const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-    const topRows = rows.slice(0, 6).map((row) => ({
-      ...row,
-      share: totalAmount ? Number(((row.amount / totalAmount) * 100).toFixed(1)) : 0,
-    }));
-
-    return {
-      rows: topRows,
-      maxAmount: topRows[0].amount,
-      topOperator: topRows[0],
-      othersCount: Math.max(0, rows.length - topRows.length),
-    };
-  }, [licenseAnalytics]);
-
   const uptimeScatterData = useMemo(() => {
     return licenseAnalytics
       .filter((license) => typeof license.uptimePercentage === 'number' && license.totalMicros > 0)
@@ -721,6 +740,37 @@ export default function AnalyticsPage({ api }) {
       >
           {dailyTrendData.length ? (
             <>
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                  View {activeDateRangeLabel}
+                </span>
+                {storedHistoryLabel ? (
+                  <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                    Stored {storedHistoryLabel}
+                  </span>
+                ) : null}
+                {historyInfo ? (
+                  <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                    {historyStatusLabel}
+                  </span>
+                ) : null}
+                {dateRange.preset !== 'all' ? (
+                  <button
+                    type="button"
+                    onClick={() => dateRange.setPreset('all')}
+                    className="inline-flex items-center rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-cyan-100 hover:bg-cyan-400/15"
+                  >
+                    Show All Stored History
+                  </button>
+                ) : null}
+              </div>
+
+              {historyCoverageMessage ? (
+                <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 mb-4 text-[11px] text-white/45">
+                  {historyCoverageMessage}
+                </div>
+              ) : null}
+
               {dailyEarningsInsights && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-6">
                   <div className="glass-subtle rounded-xl p-3">
@@ -739,9 +789,9 @@ export default function AnalyticsPage({ api }) {
                     <p className="text-[10px] text-white/35 mt-1">{dailyEarningsInsights.latestDay.label}</p>
                   </div>
                   <div className="glass-subtle rounded-xl p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-white/30">7d Run Rate</p>
+                    <p className="text-[10px] uppercase tracking-wider text-white/30">Latest 7d Avg</p>
                     <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(dailyEarningsInsights.latestDay.rollingAverage)}</p>
-                    <p className="text-[10px] text-white/35 mt-1">Peak run {dailyEarningsInsights.strongestRunRateDay.label}</p>
+                    <p className="text-[10px] text-white/35 mt-1">Window ending {dailyEarningsInsights.latestDay.label}</p>
                   </div>
                 </div>
               )}
@@ -819,7 +869,9 @@ export default function AnalyticsPage({ api }) {
               </div>
             </>
           ) : (
-            <div className="h-[420px] flex items-center justify-center text-sm text-white/30">No reward flow to chart yet.</div>
+            <div className="h-[420px] flex items-center justify-center text-sm text-white/30 px-6 text-center">
+              {historyCoverageMessage || 'No reward flow to chart yet.'}
+            </div>
           )}
       </ChartCard>
 
@@ -962,7 +1014,7 @@ export default function AnalyticsPage({ api }) {
           eyebrow="Device Leaders"
           title="Top devices by rewards"
           description="Groups licenses by backend device name and ranks them by selected-range earnings."
-          className="xl:col-span-2"
+          className="xl:col-span-3"
           footer={topDeviceRewards.length ? `${topDeviceRewards[0].name} is the strongest device family in the current range.` : 'No device reward data in this range.'}
         >
           {topDeviceRewards.length ? (
@@ -989,43 +1041,6 @@ export default function AnalyticsPage({ api }) {
             </ResponsiveContainer>
           ) : (
             <div className="h-[320px] flex items-center justify-center text-sm text-white/30">No device rewards to rank yet.</div>
-          )}
-        </ChartCard>
-
-        <ChartCard
-          eyebrow="Operator Mix"
-          title="Operator reward split"
-          description="Ranks operator assignments by selected-range reward output and license coverage."
-          footer={operatorRewardMix.topOperator ? `${operatorRewardMix.topOperator.name} leads operator output in the visible range.` : 'No operator-linked rewards in this date range.'}
-        >
-          {operatorRewardMix.rows.length ? (
-            <div className="space-y-3">
-              {operatorRewardMix.rows.map((entry, index) => (
-                <div key={entry.name} className="glass-subtle rounded-xl p-3.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{entry.name}</p>
-                      <p className="text-[10px] text-white/35 mt-1">{entry.licenseCount} license{entry.licenseCount !== 1 ? 's' : ''} · {formatShareValue(entry.share)}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-semibold text-white">{formatUsdValue(entry.amount)}</p>
-                      <p className="text-[10px] text-white/35 mt-1">Rank #{index + 1}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 h-2 rounded-full bg-white/[0.05] overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${index === 0 ? 'bg-gradient-to-r from-emerald-400 to-cyan-400' : 'bg-gradient-to-r from-indigo-500 to-violet-400'}`}
-                      style={{ width: `${operatorRewardMix.maxAmount ? Math.max(8, (entry.amount / operatorRewardMix.maxAmount) * 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-              {operatorRewardMix.othersCount ? (
-                <p className="text-[11px] text-white/35">{operatorRewardMix.othersCount} additional operator bucket{operatorRewardMix.othersCount !== 1 ? 's' : ''} sit below the visible top list.</p>
-              ) : null}
-            </div>
-          ) : (
-            <div className="h-[320px] flex items-center justify-center text-sm text-white/30">No operator-linked rewards to compare yet.</div>
           )}
         </ChartCard>
 

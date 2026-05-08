@@ -29,11 +29,11 @@ function CustomTooltip({ active, payload, label }) {
         {point.count} allocation{point.count !== 1 ? 's' : ''}
       </p>
       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', marginTop: 2 }}>
-        3-cycle trend ${point.movingAverage.toFixed(2)} UP
+        3-month trend ${point.movingAverage.toFixed(2)} UP
       </p>
       {point.deltaAmount !== null ? (
         <p style={{ fontSize: 10, color: point.deltaAmount >= 0 ? '#22c55e' : '#f59e0b', marginTop: 2 }}>
-          {point.deltaAmount >= 0 ? '+' : ''}{point.deltaAmount.toFixed(2)} UP vs previous cycle
+          {point.deltaAmount >= 0 ? '+' : ''}{point.deltaAmount.toFixed(2)} UP vs previous month
         </p>
       ) : null}
     </div>
@@ -59,55 +59,55 @@ export default function MonthlyCycleChart({ data }) {
       return {
         series: [],
         averageAmount: 0,
-        peakCycle: null,
-        latestCycle: null,
+        peakMonth: null,
+        latestMonth: null,
       };
     }
 
     const totalAmount = normalizedData.reduce((sum, entry) => sum + entry.amount, 0);
-    const peakCycle = normalizedData.reduce((bestEntry, entry) => (entry.amount > bestEntry.amount ? entry : bestEntry), normalizedData[0]);
-    const latestCycle = normalizedData[normalizedData.length - 1];
+    const peakMonth = normalizedData.reduce((bestEntry, entry) => (entry.amount > bestEntry.amount ? entry : bestEntry), normalizedData[0]);
+    const latestMonth = normalizedData[normalizedData.length - 1];
 
     return {
       series: normalizedData.map((entry) => ({
         ...entry,
-        isPeak: entry.key === peakCycle.key,
-        isLatest: entry.key === latestCycle.key,
+        isPeak: entry.key === peakMonth.key,
+        isLatest: entry.key === latestMonth.key,
       })),
       averageAmount: totalAmount / normalizedData.length,
-      peakCycle,
-      latestCycle,
+      peakMonth,
+      latestMonth,
     };
   }, [data]);
 
   if (!chartModel.series.length) return <div className="text-white/30 text-sm">No data yet</div>;
 
-  const latestDelta = chartModel.latestCycle?.deltaAmount;
+  const latestDelta = chartModel.latestMonth?.deltaAmount;
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
         <div className="glass-subtle rounded-xl p-3">
-          <p className="text-[10px] uppercase tracking-wider text-white/30">Best Cycle</p>
-          <p className="text-sm font-semibold text-white mt-1">{chartModel.peakCycle?.label || '—'}</p>
-          <p className="text-[10px] text-white/35 mt-1">{chartModel.peakCycle ? `$${chartModel.peakCycle.amount.toFixed(2)} UP` : '—'}</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/30">Best Month</p>
+          <p className="text-sm font-semibold text-white mt-1">{chartModel.peakMonth?.label || '—'}</p>
+          <p className="text-[10px] text-white/35 mt-1">{chartModel.peakMonth ? `$${chartModel.peakMonth.amount.toFixed(2)} UP` : '—'}</p>
         </div>
         <div className="glass-subtle rounded-xl p-3">
-          <p className="text-[10px] uppercase tracking-wider text-white/30">Average Cycle</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/30">Average Month</p>
           <p className="text-sm font-semibold text-white mt-1">${chartModel.averageAmount.toFixed(2)}</p>
-          <p className="text-[10px] text-white/35 mt-1">Across visible payout cycles</p>
+          <p className="text-[10px] text-white/35 mt-1">Across visible calendar months</p>
         </div>
         <div className="glass-subtle rounded-xl p-3">
-          <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Cycle</p>
-          <p className="text-sm font-semibold text-white mt-1">{chartModel.latestCycle?.label || '—'}</p>
-          <p className="text-[10px] text-white/35 mt-1">{chartModel.latestCycle ? `$${chartModel.latestCycle.amount.toFixed(2)} UP` : '—'}</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Month</p>
+          <p className="text-sm font-semibold text-white mt-1">{chartModel.latestMonth?.label || '—'}</p>
+          <p className="text-[10px] text-white/35 mt-1">{chartModel.latestMonth ? `$${chartModel.latestMonth.amount.toFixed(2)} UP` : '—'}</p>
         </div>
         <div className="glass-subtle rounded-xl p-3">
-          <p className="text-[10px] uppercase tracking-wider text-white/30">Cycle Change</p>
+          <p className="text-[10px] uppercase tracking-wider text-white/30">Month Change</p>
           <p className="text-sm font-semibold text-white mt-1">
             {latestDelta === null || latestDelta === undefined ? '—' : `${latestDelta >= 0 ? '+' : ''}$${latestDelta.toFixed(2)}`}
           </p>
-          <p className="text-[10px] text-white/35 mt-1">Latest versus previous cycle</p>
+          <p className="text-[10px] text-white/35 mt-1">Latest versus previous month</p>
         </div>
       </div>
 
@@ -174,19 +174,19 @@ export default function MonthlyCycleChart({ data }) {
       <div className="flex flex-wrap items-center gap-4 text-[10px] text-white/35 uppercase tracking-[0.18em]">
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-sm bg-success" />
-          Peak Cycle
+          Peak Month
         </div>
         <div className="flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-sm bg-cyan-400" />
-          Latest Cycle
+          Latest Month
         </div>
         <div className="flex items-center gap-2">
           <span className="h-[2px] w-5 rounded-full bg-accent-cyan" />
-          3-Cycle Trend
+          3-Month Trend
         </div>
         <div className="flex items-center gap-2">
           <span className="h-[2px] w-5 rounded-full border-t border-dashed border-white/40" />
-          Average Cycle
+          Average Month
         </div>
       </div>
     </div>
