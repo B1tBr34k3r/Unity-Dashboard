@@ -485,56 +485,69 @@ export default function AnalyticsPage({ api }) {
     });
   }, [licenseAnalytics]);
 
-  const rewardConcentration = useMemo(() => {
-    const rewarded = licenseAnalytics
-      .filter((license) => license.totalMicros > 0)
-      .sort((left, right) => right.totalMicros - left.totalMicros);
-
-    if (!rewarded.length) {
+  const rewardCadence = useMemo(() => {
+    if (!dailyTrendData.length) {
       return null;
     }
 
-    const totalMicros = rewarded.reduce((sum, license) => sum + license.totalMicros, 0);
-    const shareForCount = (count) => rewarded.slice(0, count).reduce((sum, license) => sum + license.totalMicros, 0) / totalMicros * 100;
-    const topOneShare = shareForCount(1);
-    const topFiveShare = shareForCount(5);
-    const topTenShare = shareForCount(10);
-    const tailShare = Math.max(0, 100 - topTenShare);
+    const totalDays = dailyTrendData.length;
+    const activeDays = dailyTrendData.filter((entry) => entry.amount > 0);
+    const quietDays = totalDays - activeDays.length;
+    const activeRate = totalDays ? (activeDays.length / totalDays) * 100 : 0;
+    const averageActiveDay = activeDays.length
+      ? activeDays.reduce((sum, entry) => sum + entry.amount, 0) / activeDays.length
+      : 0;
 
-    let halfCoverageCount = 0;
-    let eightyCoverageCount = 0;
-    let cumulativeMicros = 0;
+    let longestActiveStreak = 0;
+    let longestQuietStreak = 0;
+    let currentActiveStreak = 0;
+    let currentQuietStreak = 0;
 
-    rewarded.forEach((license, index) => {
-      cumulativeMicros += license.totalMicros;
-      const cumulativeShare = cumulativeMicros / totalMicros;
-
-      if (!halfCoverageCount && cumulativeShare >= 0.5) {
-        halfCoverageCount = index + 1;
+    dailyTrendData.forEach((entry) => {
+      if (entry.amount > 0) {
+        currentActiveStreak += 1;
+        currentQuietStreak = 0;
+      } else {
+        currentQuietStreak += 1;
+        currentActiveStreak = 0;
       }
 
-      if (!eightyCoverageCount && cumulativeShare >= 0.8) {
-        eightyCoverageCount = index + 1;
+      longestActiveStreak = Math.max(longestActiveStreak, currentActiveStreak);
+      longestQuietStreak = Math.max(longestQuietStreak, currentQuietStreak);
+    });
+
+    let bestWeekTotal = 0;
+    let bestWeekStartLabel = dailyTrendData[0].label;
+    let bestWeekEndLabel = dailyTrendData[0].label;
+
+    dailyTrendData.forEach((_, index) => {
+      const windowEntries = dailyTrendData.slice(Math.max(0, index - 6), index + 1);
+      const windowTotal = windowEntries.reduce((sum, entry) => sum + entry.amount, 0);
+
+      if (windowTotal > bestWeekTotal) {
+        bestWeekTotal = windowTotal;
+        bestWeekStartLabel = windowEntries[0].label;
+        bestWeekEndLabel = windowEntries[windowEntries.length - 1].label;
       }
     });
 
+    const latestWeekEntries = dailyTrendData.slice(-7);
+    const latestWeekTotal = latestWeekEntries.reduce((sum, entry) => sum + entry.amount, 0);
+
     return {
-      rewardedCount: rewarded.length,
-      topContributor: rewarded[0],
-      topOneShare: Number(topOneShare.toFixed(1)),
-      topFiveShare: Number(topFiveShare.toFixed(1)),
-      topTenShare: Number(topTenShare.toFixed(1)),
-      tailShare: Number(tailShare.toFixed(1)),
-      halfCoverageCount,
-      eightyCoverageCount,
-      segments: [
-        { label: 'Top 1', share: Number(topOneShare.toFixed(1)), color: '#22c55e' },
-        { label: 'Next 4', share: Number(Math.max(0, topFiveShare - topOneShare).toFixed(1)), color: '#818cf8' },
-        { label: 'Next 5', share: Number(Math.max(0, topTenShare - topFiveShare).toFixed(1)), color: '#06b6d4' },
-        { label: 'Tail', share: Number(tailShare.toFixed(1)), color: '#64748b' },
-      ].filter((segment) => segment.share > 0),
+      totalDays,
+      activeDays: activeDays.length,
+      quietDays,
+      activeRate: Number(activeRate.toFixed(1)),
+      quietRate: Number((100 - activeRate).toFixed(1)),
+      averageActiveDay: Number(averageActiveDay.toFixed(2)),
+      bestWeekTotal: Number(bestWeekTotal.toFixed(2)),
+      latestWeekTotal: Number(latestWeekTotal.toFixed(2)),
+      bestWeekLabel: `${bestWeekStartLabel} - ${bestWeekEndLabel}`,
+      longestActiveStreak,
+      longestQuietStreak,
     };
-  }, [licenseAnalytics]);
+  }, [dailyTrendData]);
 
   const topDeviceRewards = useMemo(() => {
     const grouped = licenseAnalytics.reduce((map, license) => {
@@ -870,64 +883,78 @@ export default function AnalyticsPage({ api }) {
         </ChartCard>
 
         <ChartCard
-          eyebrow="Concentration"
-          title="Reward concentration profile"
-          description="Shows how dependent the visible range is on a small set of licenses versus the long tail."
-          footer={rewardConcentration ? `${rewardConcentration.halfCoverageCount} licenses generate half of the visible rewards.` : 'No rewarded licenses in this date range.'}
+          eyebrow="Cadence"
+          title="Reward cadence profile"
+          description="Shows how steady the visible reward flow is, how often rewards land, and whether the range is streaky or quiet."
+          footer={rewardCadence ? `${rewardCadence.activeDays} active reward days across ${rewardCadence.totalDays} visible days.` : 'No rewarded days in this date range.'}
         >
-          {rewardConcentration ? (
+          {rewardCadence ? (
             <>
               <div className="grid grid-cols-2 gap-2.5">
                 <div className="glass-subtle rounded-xl p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-white/30">Top 1</p>
-                  <p className="text-sm font-semibold text-white mt-1">{formatShareValue(rewardConcentration.topOneShare)}</p>
-                  <p className="text-[10px] text-white/35 mt-1">Single-license share</p>
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Active Days</p>
+                  <p className="text-sm font-semibold text-white mt-1">{rewardCadence.activeDays}</p>
+                  <p className="text-[10px] text-white/35 mt-1">{formatShareValue(rewardCadence.activeRate)} of visible range</p>
                 </div>
                 <div className="glass-subtle rounded-xl p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-white/30">Top 5</p>
-                  <p className="text-sm font-semibold text-white mt-1">{formatShareValue(rewardConcentration.topFiveShare)}</p>
-                  <p className="text-[10px] text-white/35 mt-1">Leader cluster share</p>
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Quiet Days</p>
+                  <p className="text-sm font-semibold text-white mt-1">{rewardCadence.quietDays}</p>
+                  <p className="text-[10px] text-white/35 mt-1">{formatShareValue(rewardCadence.quietRate)} with no payout</p>
                 </div>
                 <div className="glass-subtle rounded-xl p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-white/30">Top 10</p>
-                  <p className="text-sm font-semibold text-white mt-1">{formatShareValue(rewardConcentration.topTenShare)}</p>
-                  <p className="text-[10px] text-white/35 mt-1">Extended leader share</p>
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Avg Active Day</p>
+                  <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(rewardCadence.averageActiveDay)}</p>
+                  <p className="text-[10px] text-white/35 mt-1">Only days with rewards</p>
                 </div>
                 <div className="glass-subtle rounded-xl p-3">
-                  <p className="text-[10px] uppercase tracking-wider text-white/30">80% Point</p>
-                  <p className="text-sm font-semibold text-white mt-1">{rewardConcentration.eightyCoverageCount}</p>
-                  <p className="text-[10px] text-white/35 mt-1">Licenses to reach 80%</p>
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Best 7d Run</p>
+                  <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(rewardCadence.bestWeekTotal)}</p>
+                  <p className="text-[10px] text-white/35 mt-1">{rewardCadence.bestWeekLabel}</p>
                 </div>
               </div>
 
               <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
                 <div className="flex h-3 rounded-full overflow-hidden bg-white/[0.05]">
-                  {rewardConcentration.segments.map((segment) => (
-                    <div
-                      key={segment.label}
-                      style={{ width: `${segment.share}%`, backgroundColor: segment.color }}
-                      title={`${segment.label}: ${segment.share}%`}
-                    />
-                  ))}
+                  <div style={{ width: `${rewardCadence.activeRate}%`, backgroundColor: '#22c55e' }} title={`Active days: ${rewardCadence.activeRate}%`} />
+                  <div style={{ width: `${rewardCadence.quietRate}%`, backgroundColor: '#475569' }} title={`Quiet days: ${rewardCadence.quietRate}%`} />
                 </div>
                 <div className="grid grid-cols-2 gap-2 mt-4">
-                  {rewardConcentration.segments.map((segment) => (
-                    <div key={segment.label} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/55">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
-                        <span>{segment.label}</span>
-                      </div>
-                      <span className="font-medium text-white">{formatShareValue(segment.share)}</span>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/55">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-success" />
+                      <span>Latest 7d</span>
                     </div>
-                  ))}
+                    <span className="font-medium text-white">{formatUsdValue(rewardCadence.latestWeekTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/55">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-accent-light" />
+                      <span>Best 7d</span>
+                    </div>
+                    <span className="font-medium text-white">{formatUsdValue(rewardCadence.bestWeekTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/55">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                      <span>Longest Active</span>
+                    </div>
+                    <span className="font-medium text-white">{rewardCadence.longestActiveStreak} day{rewardCadence.longestActiveStreak === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/55">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
+                      <span>Longest Quiet</span>
+                    </div>
+                    <span className="font-medium text-white">{rewardCadence.longestQuietStreak} day{rewardCadence.longestQuietStreak === 1 ? '' : 's'}</span>
+                  </div>
                 </div>
                 <p className="text-[11px] text-white/35 mt-4">
-                  {rewardConcentration.topContributor.displayName} is currently the heaviest individual contributor, while the tail still contributes {formatShareValue(rewardConcentration.tailShare)} of range rewards.
+                  Rewards landed on {formatShareValue(rewardCadence.activeRate)} of visible days. The best 7-day stretch produced {formatUsdValue(rewardCadence.bestWeekTotal)}, while the longest dry spell lasted {rewardCadence.longestQuietStreak} day{rewardCadence.longestQuietStreak === 1 ? '' : 's'}.
                 </p>
               </div>
             </>
           ) : (
-            <div className="h-[300px] flex items-center justify-center text-sm text-white/30">No rewarded licenses to profile yet.</div>
+            <div className="h-[300px] flex items-center justify-center text-sm text-white/30">No rewarded days to profile yet.</div>
           )}
         </ChartCard>
 

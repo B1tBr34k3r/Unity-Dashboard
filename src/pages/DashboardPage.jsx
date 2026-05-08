@@ -232,7 +232,7 @@ export default function DashboardPage({ api }) {
       </div>
 
       <div className="glass p-3.5 sm:p-6">
-        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Reward Contributor Leaderboard</h2>
+        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Contributor Snapshot</h2>
         <RewardsChart data={rewardContributorData} />
       </div>
 
