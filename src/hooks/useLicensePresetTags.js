@@ -1,64 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
+import { pushLocalCustomDashboardDataToProfile } from '../data/apiAdapter';
+import {
+  clearPresetTags,
+  normalizePresetTag,
+  normalizePresetTags,
+  readPresetTags,
+  writePresetTags,
+} from '../data/customDashboardDataStorage';
 import { LICENSE_TAG_PRESETS } from '../utils/licenseDisplay';
-
-const STORAGE_KEY = 'unity_license_preset_tags';
-
-function getScopedStorageKey(userId) {
-  return userId ? `${STORAGE_KEY}:${userId}` : null;
-}
-
-function persistPresetTags(userId, presetTags) {
-  const storageKey = getScopedStorageKey(userId);
-
-  if (!storageKey) {
-    return;
-  }
-
-  localStorage.setItem(storageKey, JSON.stringify(presetTags));
-}
-
-function readPresetTags(userId) {
-  if (!userId) {
-    return {};
-  }
-
-  const scopedKey = getScopedStorageKey(userId);
-
-  try {
-    const raw = scopedKey ? localStorage.getItem(scopedKey) : null;
-    if (raw) {
-      return JSON.parse(raw) || {};
-    }
-  } catch {
-    return {};
-  }
-
-  try {
-    const legacyRaw = localStorage.getItem(STORAGE_KEY);
-    if (legacyRaw) {
-      const migrated = JSON.parse(legacyRaw) || {};
-
-      if (migrated && typeof migrated === 'object' && !Array.isArray(migrated) && Object.keys(migrated).length > 0) {
-        persistPresetTags(userId, migrated);
-        localStorage.removeItem(STORAGE_KEY);
-        return migrated;
-      }
-    }
-  } catch {
-    return {};
-  }
-
-  return {};
-}
-
-function normalizePresetTag(tag) {
-  const trimmedTag = tag ? tag.trim() : '';
-  if (!trimmedTag) return '';
-
-  return LICENSE_TAG_PRESETS.find(
-    (preset) => preset.toLowerCase() === trimmedTag.toLowerCase()
-  ) || '';
-}
 
 export function useLicensePresetTags(userId) {
   const [presetTags, setPresetTags] = useState(() => readPresetTags(userId));
@@ -77,24 +26,17 @@ export function useLicensePresetTags(userId) {
       } else {
         delete next[licenseId];
       }
-      persistPresetTags(userId, next);
+      writePresetTags(userId, next);
+      void pushLocalCustomDashboardDataToProfile(userId);
       return next;
     });
   }, [userId]);
 
   const replacePresetTags = useCallback((nextPresetTags) => {
-    const normalized = Object.entries(nextPresetTags || {}).reduce((accumulator, [licenseId, tag]) => {
-      const normalizedTag = normalizePresetTag(tag);
-
-      if (licenseId && normalizedTag) {
-        accumulator[licenseId] = normalizedTag;
-      }
-
-      return accumulator;
-    }, {});
-
-    persistPresetTags(userId, normalized);
+    const normalized = normalizePresetTags(nextPresetTags);
+    writePresetTags(userId, normalized);
     setPresetTags(normalized);
+    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   const getPresetTag = useCallback(
@@ -103,11 +45,9 @@ export function useLicensePresetTags(userId) {
   );
 
   const resetPresetTags = useCallback(() => {
-    const scopedKey = getScopedStorageKey(userId);
-    if (scopedKey) {
-      localStorage.removeItem(scopedKey);
-    }
+    clearPresetTags(userId);
     setPresetTags({});
+    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   return {

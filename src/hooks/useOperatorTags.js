@@ -1,70 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-
-const STORAGE_KEY = 'unity_license_operators';
-
-function getScopedStorageKey(userId) {
-  return userId ? `${STORAGE_KEY}:${userId}` : null;
-}
-
-function normalizeOperators(rawValue) {
-  if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
-    return {};
-  }
-
-  return Object.entries(rawValue).reduce((accumulator, [licenseId, operatorName]) => {
-    const trimmedName = typeof operatorName === 'string' ? operatorName.trim() : '';
-
-    if (licenseId && trimmedName) {
-      accumulator[licenseId] = trimmedName;
-    }
-
-    return accumulator;
-  }, {});
-}
-
-function persistOperators(userId, operators) {
-  const storageKey = getScopedStorageKey(userId);
-
-  if (!storageKey) {
-    return;
-  }
-
-  localStorage.setItem(storageKey, JSON.stringify(operators));
-}
-
-function readOperators(userId) {
-  if (!userId) {
-    return {};
-  }
-
-  const scopedKey = getScopedStorageKey(userId);
-
-  try {
-    const raw = scopedKey ? localStorage.getItem(scopedKey) : null;
-    if (raw) {
-      return normalizeOperators(JSON.parse(raw));
-    }
-  } catch {
-    return {};
-  }
-
-  try {
-    const legacyRaw = localStorage.getItem(STORAGE_KEY);
-    if (legacyRaw) {
-      const migrated = normalizeOperators(JSON.parse(legacyRaw));
-
-      if (Object.keys(migrated).length > 0) {
-        persistOperators(userId, migrated);
-        localStorage.removeItem(STORAGE_KEY);
-        return migrated;
-      }
-    }
-  } catch {
-    return {};
-  }
-
-  return {};
-}
+import { pushLocalCustomDashboardDataToProfile } from '../data/apiAdapter';
+import { clearOperators, normalizeOperators, readOperators, writeOperators } from '../data/customDashboardDataStorage';
 
 export function useOperatorTags(userId) {
   const [operators, setOperators] = useState(() => readOperators(userId));
@@ -82,15 +18,17 @@ export function useOperatorTags(userId) {
       } else {
         delete next[licenseId];
       }
-      persistOperators(userId, next);
+      writeOperators(userId, next);
+      void pushLocalCustomDashboardDataToProfile(userId);
       return next;
     });
   }, [userId]);
 
   const replaceOperators = useCallback((nextOperators) => {
     const normalized = normalizeOperators(nextOperators);
-    persistOperators(userId, normalized);
+    writeOperators(userId, normalized);
     setOperators(normalized);
+    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   const getOperator = useCallback(
@@ -99,11 +37,9 @@ export function useOperatorTags(userId) {
   );
 
   const resetOperators = useCallback(() => {
-    const scopedKey = getScopedStorageKey(userId);
-    if (scopedKey) {
-      localStorage.removeItem(scopedKey);
-    }
+    clearOperators(userId);
     setOperators({});
+    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   // All unique operator names (sorted)

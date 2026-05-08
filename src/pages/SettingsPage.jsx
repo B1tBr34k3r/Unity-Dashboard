@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Download, LogOut, RefreshCw, RotateCcw, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
@@ -6,11 +6,12 @@ import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
 
 export default function SettingsPage({ api }) {
-  const { user, refetch, logout, isLoading, historyInfo, resetRewardHistoryCache } = api;
+  const { user, refetch, logout, isLoading, historyInfo, resetRewardHistoryCache, customDataSyncInfo } = api;
   const { labels, replaceLabels, resetLabels } = useLicenseLabels(user?.id);
   const { presetTags, replacePresetTags, resetPresetTags } = useLicensePresetTags(user?.id);
   const { operators, replaceOperators, resetOperators } = useOperatorTags(user?.id);
   const importInputRef = useRef(null);
+  const [transferNotice, setTransferNotice] = useState(null);
   const labelCount = Object.keys(labels).length;
   const presetTagCount = Object.keys(presetTags).length;
   const operatorCount = Object.keys(operators).length;
@@ -25,6 +26,28 @@ export default function SettingsPage({ api }) {
     unsupported: 'API paging not confirmed',
     pending: 'Backfill pending',
   }[historyInfo?.backfillStatus || 'pending'];
+
+  useEffect(() => {
+    setTransferNotice(customDataSyncInfo || null);
+  }, [customDataSyncInfo, user?.id]);
+
+  const transferNoticeText = (() => {
+    if (!transferNotice?.counts) {
+      return null;
+    }
+
+    const { labelCount: importedLabels, presetTagCount: importedPresetTags, operatorCount: importedOperators } = transferNotice.counts;
+
+    if (transferNotice.source === 'account') {
+      return `${importedLabels} custom name${importedLabels !== 1 ? 's' : ''}, ${importedPresetTags} preset tag${importedPresetTags !== 1 ? 's' : ''}, and ${importedOperators} operator assignment${importedOperators !== 1 ? 's' : ''} loaded from your synced Unity account data on this device.`;
+    }
+
+    if (transferNotice.source === 'file') {
+      return `${importedLabels} custom name${importedLabels !== 1 ? 's' : ''}, ${importedPresetTags} preset tag${importedPresetTags !== 1 ? 's' : ''}, and ${importedOperators} operator assignment${importedOperators !== 1 ? 's' : ''} imported from a backup file for user ID ${transferNotice.userId || user?.id || '—'}.`;
+    }
+
+    return null;
+  })();
 
   const handleResetCustomData = () => {
     if (!hasCustomData) {
@@ -43,6 +66,7 @@ export default function SettingsPage({ api }) {
     resetLabels();
     resetPresetTags();
     resetOperators();
+    setTransferNotice(null);
     toast.success('Custom dashboard data reset');
   };
 
@@ -130,6 +154,16 @@ export default function SettingsPage({ api }) {
       replaceLabels(nextLabels);
       replacePresetTags(nextPresetTags);
       replaceOperators(nextOperators);
+      setTransferNotice({
+        source: 'file',
+        userId: user.id,
+        syncedAt: new Date().toISOString(),
+        counts: {
+          labelCount: Object.keys(nextLabels).length,
+          presetTagCount: Object.keys(nextPresetTags).length,
+          operatorCount: Object.keys(nextOperators).length,
+        },
+      });
       toast.success('Custom dashboard data imported');
     } catch (error) {
       toast.error(error.message || 'Failed to import custom data');
@@ -237,11 +271,13 @@ export default function SettingsPage({ api }) {
             <div>
               <h3 className="text-sm font-medium text-white">Transfer Custom Dashboard Data</h3>
               <p className="text-xs text-white/30 mt-1">
-                Export your custom names, preset tags, and operator assignments into a file, then import that file on another browser or on the Vercel site.
+                Custom names, preset tags, and operator assignments now sync to this Unity account, so the same account should load them on your other devices after sign-in.
               </p>
-              <p className="text-xs text-white/40 mt-2">
-                Imported data is saved under user ID {user?.id || '—'} so another Unity account on this site will not see it.
-              </p>
+              {transferNoticeText && (
+                <p className="text-xs text-white/40 mt-2">
+                  {transferNoticeText}
+                </p>
+              )}
             </div>
             <div className="flex flex-col sm:flex-row gap-2 shrink-0">
               <button

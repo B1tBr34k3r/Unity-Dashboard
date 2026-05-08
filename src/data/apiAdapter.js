@@ -3,10 +3,16 @@
 // Auth: Supabase JWT via email login
 // Anon key required as `apikey` header on all requests
 
+import { readCustomDashboardData, writeCustomDashboardData } from './customDashboardDataStorage';
+
 const BASE_URL = 'https://api.unityedge.io';
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const TOKEN_STORAGE_KEY = 'unity_edge_token';
 const REFRESH_TOKEN_STORAGE_KEY = 'unity_edge_refresh_token';
+const USER_STORAGE_KEY = 'unity_edge_user';
+const CUSTOM_DASHBOARD_DATA_METADATA_KEY = 'unity_dashboard_custom_data';
+const CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS = 150;
+const pendingCustomDashboardSyncs = new Map();
 
 function readSessionValue(storageKey) {
   if (typeof window === 'undefined') {
@@ -56,6 +62,33 @@ function removeSessionValue(storageKey) {
   }
 }
 
+function readStoredUser() {
+  const rawUser = readSessionValue(USER_STORAGE_KEY);
+
+  if (!rawUser) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawUser);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredUser(user) {
+  if (!user || typeof user !== 'object') {
+    removeSessionValue(USER_STORAGE_KEY);
+    return;
+  }
+
+  writeSessionValue(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+function clearStoredUser() {
+  removeSessionValue(USER_STORAGE_KEY);
+}
+
 function getAnonKey() {
   if (!ANON_KEY) {
     throw new Error('Missing VITE_SUPABASE_ANON_KEY. Add it in Vercel Project Settings -> Environment Variables, then redeploy.');
@@ -90,6 +123,7 @@ export function setToken(token) {
 
 export function clearToken() {
   removeSessionValue(TOKEN_STORAGE_KEY);
+  clearStoredUser();
 }
 
 function getRefreshToken() {
@@ -193,7 +227,9 @@ export function loginWithToken(token) {
 }
 
 export async function getUser() {
-  return request('/auth/v1/user');
+  const user = await request('/auth/v1/user');
+  writeStoredUser(user);
+  return user;
 }
 
 export async function refreshSession() {
@@ -220,7 +256,115 @@ export async function refreshSession() {
   if (data.refresh_token) {
     setRefreshToken(data.refresh_token);
   }
+  if (data.user) {
+    writeStoredUser(data.user);
+  }
   return data;
+}
+
+export function getCustomDashboardDataFromUser(user) {
+  const rawCustomData = user?.user_metadata?.[CUSTOM_DASHBOARD_DATA_METADATA_KEY];
+
+  if (!rawCustomData || typeof rawCustomData !== 'object' || Array.isArray(rawCustomData)) {
+    return null;
+  }
+
+  return rawCustomData;
+}
+
+function getCustomDashboardDataCounts(customData) {
+  return {
+    labelCount: Object.keys(customData?.labels || {}).length,
+    presetTagCount: Object.keys(customData?.presetTags || {}).length,
+    operatorCount: Object.keys(customData?.operators || {}).length,
+  };
+}
+
+export function hydrateLocalCustomDashboardDataFromUser(user) {
+  if (!user?.id) {
+    return null;
+  }
+
+  const remoteCustomData = getCustomDashboardDataFromUser(user);
+
+  if (!remoteCustomData) {
+    return null;
+  }
+
+  const normalizedCustomData = writeCustomDashboardData(user.id, remoteCustomData);
+  const counts = getCustomDashboardDataCounts(normalizedCustomData);
+
+  if (counts.labelCount + counts.presetTagCount + counts.operatorCount === 0) {
+    return null;
+  }
+
+  return {
+    source: 'account',
+    userId: user.id,
+    syncedAt: new Date().toISOString(),
+    counts,
+  };
+}
+
+async function syncLocalCustomDashboardDataToProfile(userId) {
+  if (!userId || !isAuthenticated()) {
+    return false;
+  }
+
+  try {
+    const currentUser = readStoredUser();
+    const baseUser = currentUser?.id === userId ? currentUser : await getUser();
+    const currentMetadata = baseUser?.user_metadata && typeof baseUser.user_metadata === 'object' && !Array.isArray(baseUser.user_metadata)
+      ? baseUser.user_metadata
+      : {};
+    const nextUser = await request('/auth/v1/user', {
+      method: 'PUT',
+      body: {
+        data: {
+          ...currentMetadata,
+          [CUSTOM_DASHBOARD_DATA_METADATA_KEY]: readCustomDashboardData(userId),
+        },
+      },
+    });
+
+    writeStoredUser(nextUser);
+    return true;
+  } catch (error) {
+    console.warn('Failed to sync custom dashboard data for the current Unity account.', error);
+    return false;
+  }
+}
+
+export function pushLocalCustomDashboardDataToProfile(userId) {
+  if (!userId || !isAuthenticated()) {
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const pendingSync = pendingCustomDashboardSyncs.get(userId);
+
+    if (pendingSync) {
+      clearTimeout(pendingSync.timerId);
+      pendingSync.resolvers.push(resolve);
+      pendingSync.timerId = setTimeout(async () => {
+        pendingCustomDashboardSyncs.delete(userId);
+        const result = await syncLocalCustomDashboardDataToProfile(userId);
+        pendingSync.resolvers.forEach((callback) => callback(result));
+      }, CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS);
+      return;
+    }
+
+    const nextPendingSync = {
+      resolvers: [resolve],
+      timerId: setTimeout(async () => {
+        pendingCustomDashboardSyncs.delete(userId);
+        const result = await syncLocalCustomDashboardDataToProfile(userId);
+        nextPendingSync.resolvers.forEach((callback) => callback(result));
+      }, CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS),
+    };
+
+    pendingCustomDashboardSyncs.set(userId, nextPendingSync);
+  });
 }
 
 // --- Rewards endpoints ---

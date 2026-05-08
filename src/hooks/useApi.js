@@ -6,6 +6,7 @@ import {
   getRewardsBalance,
   getRewardsAllocations,
   getRewardsAllocationsSummary,
+  hydrateLocalCustomDashboardDataFromUser,
   refreshSession,
   clearToken,
   clearRefreshToken,
@@ -28,6 +29,7 @@ export function useApi() {
   const [licenses, setLicenses] = useState([]);
   const [allocations, setAllocations] = useState([]);
   const [summary, setSummary] = useState([]);
+  const [customDataSyncInfo, setCustomDataSyncInfo] = useState(null);
   const [historyInfo, setHistoryInfo] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -207,6 +209,7 @@ export function useApi() {
     setLicenses([]);
     setAllocations([]);
     setSummary([]);
+    setCustomDataSyncInfo(null);
     setHistoryInfo(null);
 
     try {
@@ -221,6 +224,7 @@ export function useApi() {
       const resolvedUser = userData.status === 'fulfilled' ? userData.value : null;
 
       if (resolvedUser) {
+        setCustomDataSyncInfo(hydrateLocalCustomDashboardDataFromUser(resolvedUser));
         setUser(resolvedUser);
       }
 
@@ -263,6 +267,7 @@ export function useApi() {
             getRewardsAllocationsSummary(30),
           ]);
 
+          setCustomDataSyncInfo(hydrateLocalCustomDashboardDataFromUser(u2));
           setUser(u2);
           setBalance(b2);
           setLicenses(Array.isArray(l2) ? l2 : []);
@@ -301,6 +306,7 @@ export function useApi() {
     setLicenses([]);
     setAllocations([]);
     setSummary([]);
+    setCustomDataSyncInfo(null);
     setHistoryInfo(null);
     setError(null);
     setAuthed(false);
@@ -316,6 +322,7 @@ export function useApi() {
     setLicenses([]);
     setAllocations([]);
     setSummary([]);
+    setCustomDataSyncInfo(null);
     setHistoryInfo(null);
     setError(null);
     setAuthed(true);
@@ -327,6 +334,7 @@ export function useApi() {
     licenses,
     allocations,
     summary,
+    customDataSyncInfo,
     historyInfo,
     isLoading,
     error,
