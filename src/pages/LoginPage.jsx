@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { sendOtp, verifyOtp, loginWithToken, getUser, signInWithMetaMask } from '../data/apiAdapter';
+import { sendOtp, verifyOtp, loginWithToken, getUser } from '../data/apiAdapter';
 import toast from 'react-hot-toast';
 import { Mail, KeyRound, ChevronRight } from 'lucide-react';
 
@@ -59,23 +59,8 @@ export default function LoginPage({ onLogin }) {
     }
   };
 
-  const handleMetaMaskLogin = async () => {
-    setLoadingAction('metamask');
-    try {
-      await signInWithMetaMask();
-      toast.success('Connected with MetaMask');
-      onLogin();
-    } catch (err) {
-      toast.error(err.message || 'MetaMask sign-in failed');
-    } finally {
-      setLoadingAction(null);
-    }
-  };
-
   const inputClass =
     'w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] backdrop-blur transition-all';
-  const secondaryButtonClass =
-    'w-full flex items-center justify-center gap-2 py-3 border border-white/[0.08] bg-white/[0.04] rounded-xl text-sm text-white hover:bg-white/[0.06] disabled:opacity-50';
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative z-10">
@@ -101,17 +86,6 @@ export default function LoginPage({ onLogin }) {
                 {loadingAction !== 'email' && <ChevronRight size={16} />}
               </button>
             </form>
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-white/[0.08]" />
-              <span className="text-[10px] uppercase tracking-[0.3em] text-white/25">or</span>
-              <div className="h-px flex-1 bg-white/[0.08]" />
-            </div>
-            <button type="button" onClick={handleMetaMaskLogin} disabled={isLoading} className={secondaryButtonClass}>
-              {loadingAction === 'metamask' ? 'Connecting...' : 'Sign In With MetaMask'}
-            </button>
-            <p className="text-xs text-white/30 text-center">
-              Use the MetaMask wallet linked to your Unity account.
-            </p>
           </div>
         )}
 
