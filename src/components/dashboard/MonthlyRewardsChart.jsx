@@ -40,7 +40,7 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-export default function MonthlyCycleChart({ data }) {
+export default function MonthlyRewardsChart({ data }) {
   const isMobile = useIsMobile();
   const chartModel = useMemo(() => {
     const normalizedData = (data || []).map((entry, index, entries) => {

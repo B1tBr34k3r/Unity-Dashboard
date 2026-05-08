@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import StatCard from '../components/dashboard/StatCard';
-import MonthlyCycleChart from '../components/dashboard/MonthlyCycleChart';
+import MonthlyRewardsChart from '../components/dashboard/MonthlyRewardsChart';
 import OperatorBadge from '../components/licenses/OperatorBadge';
 import { useOperatorTags } from '../hooks/useOperatorTags';
-import { formatRewardMonthLabel, getCycleInfo, getRewardMonthKey, microsToUsd } from '../utils/formatters';
+import { aggregateByRewardMonth, formatRewardDayLabel, formatRewardMonthLabel, getRewardMonthKey, microsToUsd } from '../utils/formatters';
 import { Wallet, TrendingUp, Calendar, Clock, RefreshCw, Users } from 'lucide-react';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
@@ -15,35 +15,16 @@ export default function DashboardPage({ api }) {
   const dateRange = useDateRangeFilter(allocations, (item) => item.completedAt, 'page-state:dashboard');
   const filteredAllocations = dateRange.filtered;
 
-  const cycleData = useMemo(() => {
-    const byMonth = (filteredAllocations || []).reduce((map, allocation) => {
-      const key = getRewardMonthKey(allocation.completedAt);
-
-      if (!map[key]) {
-        map[key] = {
-          key,
-          label: formatRewardMonthLabel(key),
-          amountMicros: 0,
-          count: 0,
-        };
-      }
-
-      map[key].amountMicros += allocation.amountMicros;
-      map[key].count += 1;
-      return map;
-    }, {});
-
-    return Object.values(byMonth)
-      .sort((left, right) => left.key.localeCompare(right.key))
-      .map((entry) => ({
-        key: entry.key,
-        label: entry.label,
-        amount: Number((entry.amountMicros / 1_000_000).toFixed(2)),
-        count: entry.count,
-      }));
+  const monthData = useMemo(() => {
+    return aggregateByRewardMonth(filteredAllocations || []).map((entry) => ({
+      key: entry.key,
+      label: entry.label,
+      amount: Number((entry.totalMicros / 1_000_000).toFixed(2)),
+      count: entry.count,
+    }));
   }, [filteredAllocations]);
 
-  // Operator summary: group allocations by operator with monthly cycle breakdown
+  // Operator summary: group allocations by operator with actual calendar-month breakdown
   const operatorSummary = useMemo(() => {
     if (!allOperators.length || !filteredAllocations?.length) return [];
 
@@ -52,29 +33,28 @@ export default function DashboardPage({ api }) {
 
     licenseIds.forEach((lid) => {
       const op = getOperator(lid) || '__unassigned__';
-      if (!byOperator[op]) byOperator[op] = { name: op, totalMicros: 0, licenseCount: 0, latestDate: null, cycles: {} };
+      if (!byOperator[op]) byOperator[op] = { name: op, totalMicros: 0, licenseCount: 0, latestDate: null, months: {} };
       byOperator[op].licenseCount++;
     });
 
     filteredAllocations.forEach((a) => {
       const op = getOperator(a.licenseId) || '__unassigned__';
-      if (!byOperator[op]) byOperator[op] = { name: op, totalMicros: 0, licenseCount: 0, latestDate: null, cycles: {} };
+      if (!byOperator[op]) byOperator[op] = { name: op, totalMicros: 0, licenseCount: 0, latestDate: null, months: {} };
       byOperator[op].totalMicros += a.amountMicros;
       if (!byOperator[op].latestDate || new Date(a.completedAt) > new Date(byOperator[op].latestDate)) {
         byOperator[op].latestDate = a.completedAt;
       }
-      // Aggregate by 5th-cycle month
-      const cycle = getCycleInfo(a.completedAt);
-      if (!byOperator[op].cycles[cycle.key]) {
-        byOperator[op].cycles[cycle.key] = { key: cycle.key, label: cycle.label, totalMicros: 0 };
+      const monthKey = getRewardMonthKey(a.completedAt);
+      if (!byOperator[op].months[monthKey]) {
+        byOperator[op].months[monthKey] = { key: monthKey, label: formatRewardMonthLabel(monthKey), totalMicros: 0 };
       }
-      byOperator[op].cycles[cycle.key].totalMicros += a.amountMicros;
+      byOperator[op].months[monthKey].totalMicros += a.amountMicros;
     });
 
     return Object.values(byOperator)
       .map((op) => ({
         ...op,
-        cycles: Object.values(op.cycles).sort((a, b) => a.key.localeCompare(b.key)),
+        months: Object.values(op.months).sort((a, b) => a.key.localeCompare(b.key)),
       }))
       .sort((a, b) => b.totalMicros - a.totalMicros);
   }, [filteredAllocations, allOperators, getOperator]);
@@ -201,7 +181,7 @@ export default function DashboardPage({ api }) {
 
       <div className="glass p-3.5 sm:p-6">
         <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Monthly Reward Momentum</h2>
-        <MonthlyCycleChart data={cycleData} />
+        <MonthlyRewardsChart data={monthData} />
       </div>
 
       {/* Operator summary */}
@@ -224,15 +204,14 @@ export default function DashboardPage({ api }) {
                 </div>
                 <p className="text-[10px] text-white/30 mb-3">
                   {op.licenseCount} license{op.licenseCount !== 1 ? 's' : ''}
-                  {op.latestDate && ` · Last active ${new Date(op.latestDate).toLocaleDateString()}`}
+                  {op.latestDate && ` · Last active ${formatRewardDayLabel(op.latestDate, true)}`}
                 </p>
-                {/* Monthly cycle breakdown */}
-                {op.cycles.length > 0 && (
+                {op.months.length > 0 && (
                   <div className="border-t border-white/[0.06] pt-2 space-y-1">
-                    {op.cycles.map((c) => (
-                      <div key={c.key} className="flex items-center justify-between text-[11px]">
-                        <span className="text-white/30">{c.label}</span>
-                        <span className="text-accent-light font-medium">${microsToUsd(c.totalMicros)} UP</span>
+                    {op.months.map((month) => (
+                      <div key={month.key} className="flex items-center justify-between text-[11px]">
+                        <span className="text-white/30">{month.label}</span>
+                        <span className="text-accent-light font-medium">${microsToUsd(month.totalMicros)} UP</span>
                       </div>
                     ))}
                   </div>

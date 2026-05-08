@@ -8,7 +8,7 @@ import { useOperatorTags } from '../hooks/useOperatorTags';
 import LicenseTagPicker from '../components/licenses/LicenseTagPicker';
 import LicenseStatusBadge from '../components/licenses/LicenseStatusBadge';
 import OperatorPicker from '../components/licenses/OperatorPicker';
-import { aggregateByCycle, formatDateShort, microsDetailed, truncateHex } from '../utils/formatters';
+import { aggregateByRewardMonth, formatDateShort, formatRewardDayLabel, microsDetailed, truncateHex } from '../utils/formatters';
 import { buildCloneIndexMap, formatLeaseTimeLeft, formatLicenseDistribution, formatTaggedLicenseName, getLicenseBackendName, getLicenseDisplayName, getLicenseOriginalBackendName } from '../utils/licenseDisplay';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import toast from 'react-hot-toast';
@@ -30,7 +30,7 @@ export default function LicenseDetailPage({ api }) {
   const dateRange = useDateRangeFilter(allLogs);
   const logs = dateRange.filtered;
 
-  const cycleData = useMemo(() => aggregateByCycle(logs), [logs]);
+  const monthData = useMemo(() => aggregateByRewardMonth(logs), [logs]);
   const hasRewardData = allLogs.length > 0;
 
   const totalReward = logs.reduce((sum, a) => sum + a.amountMicros, 0);
@@ -40,7 +40,7 @@ export default function LicenseDetailPage({ api }) {
 
   // Chart data
   const chartData = logs.map((a) => ({
-    date: new Date(a.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    date: formatRewardDayLabel(a.completedAt),
     reward: Number((a.amountMicros / 1_000_000).toFixed(4)),
   }));
 
@@ -283,16 +283,15 @@ export default function LicenseDetailPage({ api }) {
         </button>
       </div>
 
-      {/* Monthly cycle breakdown */}
-      {cycleData.length > 0 && (
+      {monthData.length > 0 && (
         <div className="glass p-4 sm:p-6 mb-4">
-          <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-4">Monthly Rewards (5th–4th Cycle)</h2>
+          <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-4">Monthly Rewards</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {cycleData.map((c) => (
-              <div key={c.key} className="glass-subtle p-3 rounded-xl">
-                <p className="text-xs text-white/40">{c.label}</p>
-                <p className="text-sm font-bold text-accent-light mt-1">${microsDetailed(c.totalMicros)} UP</p>
-                <p className="text-[10px] text-white/20">{c.count} rewards</p>
+            {monthData.map((month) => (
+              <div key={month.key} className="glass-subtle p-3 rounded-xl">
+                <p className="text-xs text-white/40">{month.label}</p>
+                <p className="text-sm font-bold text-accent-light mt-1">${microsDetailed(month.totalMicros)} UP</p>
+                <p className="text-[10px] text-white/20">{month.count} rewards</p>
               </div>
             ))}
           </div>

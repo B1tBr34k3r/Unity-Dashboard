@@ -67,58 +67,31 @@ export function formatRewardMonthLabel(dateValue) {
   });
 }
 
+export function aggregateByRewardMonth(allocations) {
+  const map = {};
+
+  for (const allocation of allocations || []) {
+    const key = getRewardMonthKey(allocation.completedAt);
+
+    if (!map[key]) {
+      map[key] = {
+        key,
+        label: formatRewardMonthLabel(key),
+        totalMicros: 0,
+        count: 0,
+      };
+    }
+
+    map[key].totalMicros += allocation.amountMicros;
+    map[key].count += 1;
+  }
+
+  return Object.values(map).sort((left, right) => left.key.localeCompare(right.key));
+}
+
 export function addDaysToRewardDayKey(dayKey, amount) {
   const nextDate = getUtcDateFromRewardDayKey(dayKey);
   nextDate.setUTCDate(nextDate.getUTCDate() + amount);
   return nextDate.toISOString().slice(0, 10);
-}
-
-function formatCycleRange(startDate, endDate) {
-  const sameYear = startDate.getUTCFullYear() === endDate.getUTCFullYear();
-
-  if (sameYear) {
-    return `${startDate.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })}`;
-  }
-
-  return `${startDate.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })}`;
-}
-
-export function getCycleInfo(isoDateStr) {
-  const [rawYear, rawMonth, rawDay] = getRewardDayKey(isoDateStr).split('-').map(Number);
-  let year = rawYear;
-  let month = rawMonth - 1;
-
-  if (rawDay < 5) {
-    month -= 1;
-    if (month < 0) {
-      month = 11;
-      year -= 1;
-    }
-  }
-
-  const key = `${year}-${String(month + 1).padStart(2, '0')}`;
-  const cycleStart = new Date(Date.UTC(year, month, 5));
-  const cycleEnd = new Date(Date.UTC(year, month + 1, 4));
-
-  return {
-    key,
-    label: formatRewardMonthLabel(key),
-    rangeLabel: formatCycleRange(cycleStart, cycleEnd),
-    year,
-    month,
-  };
-}
-
-export function aggregateByCycle(allocations) {
-  const map = {};
-  for (const a of allocations) {
-    const info = getCycleInfo(a.completedAt);
-    if (!map[info.key]) {
-      map[info.key] = { key: info.key, label: info.label, rangeLabel: info.rangeLabel, totalMicros: 0, count: 0 };
-    }
-    map[info.key].totalMicros += a.amountMicros;
-    map[info.key].count += 1;
-  }
-  return Object.values(map).sort((a, b) => a.key.localeCompare(b.key));
 }
 
