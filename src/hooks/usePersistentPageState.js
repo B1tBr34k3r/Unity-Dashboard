@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
+const PAGE_STATE_PREFIX = 'page-state:';
+
 function resolveInitialValue(initialValue) {
   return typeof initialValue === 'function' ? initialValue() : initialValue;
 }
@@ -15,6 +17,22 @@ function readStoredValue(storageKey, initialValue) {
     return storedValue !== null ? JSON.parse(storedValue) : fallbackValue;
   } catch {
     return fallbackValue;
+  }
+}
+
+export function clearPersistentPageState() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    Object.keys(window.sessionStorage).forEach((storageKey) => {
+      if (storageKey.startsWith(PAGE_STATE_PREFIX)) {
+        window.sessionStorage.removeItem(storageKey);
+      }
+    });
+  } catch {
+    // Ignore session storage access failures and keep logout/login working.
   }
 }
 

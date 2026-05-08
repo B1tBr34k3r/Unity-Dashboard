@@ -19,6 +19,7 @@ import {
   shouldAttemptRewardBackfill,
   writeRewardHistory,
 } from '../data/rewardHistory';
+import { clearPersistentPageState } from './usePersistentPageState';
 
 export function useApi() {
   const [user, setUser] = useState(null);
@@ -291,6 +292,7 @@ export function useApi() {
   const logout = () => {
     clearToken();
     localStorage.removeItem('unity_edge_refresh_token');
+    clearPersistentPageState();
     latestAllocationsRef.current = [];
     currentUserIdRef.current = null;
     setUser(null);
@@ -305,6 +307,7 @@ export function useApi() {
 
   const onLogin = () => {
     // Clear any stale data from previous account
+    clearPersistentPageState();
     latestAllocationsRef.current = [];
     currentUserIdRef.current = null;
     setUser(null);
