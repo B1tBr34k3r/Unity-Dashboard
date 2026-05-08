@@ -13,7 +13,7 @@ import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
 
 export default function DashboardPage({ api }) {
-  const { balance, licenses, allocations, summary, isLoading, error, refetch } = api;
+  const { balance, licenses, allocations, summary, historyInfo, isLoading, error, refetch } = api;
   const summaryData = summary?.[0] || null;
   const { getLabel } = useLicenseLabels();
   const { getPresetTag, presetTags } = useLicensePresetTags();
@@ -111,14 +111,75 @@ export default function DashboardPage({ api }) {
       .sort((a, b) => b.totalMicros - a.totalMicros);
   }, [filteredAllocations, allOperators, getOperator]);
 
+  const historyStatus = useMemo(() => {
+    switch (historyInfo?.backfillStatus) {
+      case 'complete':
+        return {
+          label: 'History Synced',
+          className: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200',
+        };
+      case 'backfilling':
+        return {
+          label: 'Backfilling Older Rewards',
+          className: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100',
+        };
+      case 'partial':
+        return {
+          label: 'Partial Archive',
+          className: 'border-amber-400/30 bg-amber-400/10 text-amber-100',
+        };
+      case 'unsupported':
+        return {
+          label: 'Stored Recent History',
+          className: 'border-slate-400/30 bg-slate-400/10 text-slate-100',
+        };
+      default:
+        return {
+          label: 'History Pending',
+          className: 'border-white/10 bg-white/[0.04] text-white/60',
+        };
+    }
+  }, [historyInfo]);
+
+  const historyRangeLabel = useMemo(() => {
+    if (!historyInfo?.oldestCompletedAt || !historyInfo?.newestCompletedAt) {
+      return null;
+    }
+
+    const formatDate = (value) => new Date(value).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    return `${formatDate(historyInfo.oldestCompletedAt)} -> ${formatDate(historyInfo.newestCompletedAt)}`;
+  }, [historyInfo]);
+
   if (isLoading) {
     return <DashboardSkeleton />;
   }
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between gap-2 sm:gap-3">
-        <h1 className="text-lg sm:text-2xl font-bold text-white">Dashboard</h1>
+      <div className="flex items-start justify-between gap-2 sm:gap-3">
+        <div>
+          <h1 className="text-lg sm:text-2xl font-bold text-white">Dashboard</h1>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${historyStatus.className}`}>
+              {historyStatus.label}
+            </span>
+            {historyInfo?.allocationCount ? (
+              <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                {historyInfo.allocationCount} Stored Rewards
+              </span>
+            ) : null}
+            {historyRangeLabel ? (
+              <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
+                {historyRangeLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           <DateRangeFilter {...dateRange} />
           <button
