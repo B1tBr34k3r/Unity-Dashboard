@@ -29,17 +29,49 @@ export default function DashboardPage({ api }) {
     [presetTags, licenseInfoById]
   );
 
-  // Group allocations by licenseId for chart
-  const licenseMap = {};
-  (filteredAllocations || []).forEach((a) => {
-    const key = a.licenseId;
-    if (!licenseMap[key]) licenseMap[key] = 0;
-    licenseMap[key] += a.amountMicros;
-  });
+  const rewardContributorData = useMemo(() => {
+    const byLicense = {};
+
+    (filteredAllocations || []).forEach((allocation) => {
+      const current = byLicense[allocation.licenseId] || {
+        amountMicros: 0,
+        count: 0,
+        latestDate: null,
+      };
+
+      current.amountMicros += allocation.amountMicros;
+      current.count += 1;
+
+      if (!current.latestDate || new Date(allocation.completedAt) > new Date(current.latestDate)) {
+        current.latestDate = allocation.completedAt;
+      }
+
+      byLicense[allocation.licenseId] = current;
+    });
+
+    return Object.entries(byLicense)
+      .map(([id, stats]) => ({
+        id,
+        name:
+          getLicenseDisplayName({
+            customLabel: getLabel(id),
+            backendName: getLicenseBackendName(licenseInfoById[id]),
+            presetTag: getPresetTag(id),
+            cloneIndex: cloneIndexById[id] || null,
+          }) || truncateHex(id),
+        amount: Number((stats.amountMicros / 1_000_000).toFixed(2)),
+        count: stats.count,
+        latestDate: stats.latestDate,
+      }))
+      .sort((left, right) => right.amount - left.amount);
+  }, [filteredAllocations, getLabel, getPresetTag, cloneIndexById, licenseInfoById]);
+
   const cycleData = useMemo(() => {
     return aggregateByCycle(filteredAllocations || []).map((c) => ({
+      key: c.key,
       label: c.label,
       amount: Number((c.totalMicros / 1_000_000).toFixed(2)),
+      count: c.count,
     }));
   }, [filteredAllocations]);
 
@@ -78,20 +110,6 @@ export default function DashboardPage({ api }) {
       }))
       .sort((a, b) => b.totalMicros - a.totalMicros);
   }, [filteredAllocations, allOperators, getOperator]);
-
-  // Chart data: top earning licenses
-  const chartData = Object.entries(licenseMap)
-    .sort(([, a], [, b]) => b - a)
-    .map(([id, micros], i) => ({
-      date:
-        getLicenseDisplayName({
-          customLabel: getLabel(id),
-          backendName: getLicenseBackendName(licenseInfoById[id]),
-          presetTag: getPresetTag(id),
-          cloneIndex: cloneIndexById[id] || null,
-        }) || truncateHex(id),
-      amount: Number((micros / 1_000_000).toFixed(2)),
-    }));
 
   if (isLoading) {
     return <DashboardSkeleton />;
@@ -153,12 +171,12 @@ export default function DashboardPage({ api }) {
       </div>
 
       <div className="glass p-3.5 sm:p-6">
-        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Rewards by License</h2>
-        <RewardsChart data={chartData} />
+        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Reward Contributor Leaderboard</h2>
+        <RewardsChart data={rewardContributorData} />
       </div>
 
       <div className="glass p-3.5 sm:p-6">
-        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Monthly Rewards (5th–4th Cycle)</h2>
+        <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Monthly Reward Momentum (5th–4th Cycle)</h2>
         <MonthlyCycleChart data={cycleData} />
       </div>
 

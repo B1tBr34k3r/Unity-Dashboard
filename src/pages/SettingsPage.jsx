@@ -5,7 +5,7 @@ import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
 
 export default function SettingsPage({ api }) {
-  const { user, refetch, logout, isLoading } = api;
+  const { user, refetch, logout, isLoading, historyInfo, resetRewardHistoryCache } = api;
   const { labels, resetLabels } = useLicenseLabels();
   const { presetTags, resetPresetTags } = useLicensePresetTags();
   const { operators, resetOperators } = useOperatorTags();
@@ -13,6 +13,16 @@ export default function SettingsPage({ api }) {
   const presetTagCount = Object.keys(presetTags).length;
   const operatorCount = Object.keys(operators).length;
   const hasCustomData = labelCount > 0 || presetTagCount > 0 || operatorCount > 0;
+  const archivedRewardCount = historyInfo?.allocationCount || 0;
+  const hasArchivedRewardHistory = archivedRewardCount > 0;
+
+  const historyStatusLabel = {
+    complete: 'Complete archive',
+    backfilling: 'Backfilling older rewards',
+    partial: 'Partial archive',
+    unsupported: 'API paging not confirmed',
+    pending: 'Backfill pending',
+  }[historyInfo?.backfillStatus || 'pending'];
 
   const handleResetCustomData = () => {
     if (!hasCustomData) {
@@ -32,6 +42,30 @@ export default function SettingsPage({ api }) {
     resetPresetTags();
     resetOperators();
     toast.success('Custom dashboard data reset');
+  };
+
+  const handleResetRewardHistory = () => {
+    if (!hasArchivedRewardHistory) {
+      toast('No archived reward history to reset');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'This will remove the long-term reward history cached in this browser for the current account. The latest live API data will remain visible, and the archive can rebuild on future refreshes. Continue?'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const didReset = resetRewardHistoryCache();
+
+    if (!didReset) {
+      toast.error('Unable to reset archived reward history');
+      return;
+    }
+
+    toast.success('Archived reward history reset');
   };
 
   return (
@@ -100,6 +134,33 @@ export default function SettingsPage({ api }) {
               className="flex items-center gap-2 px-4 py-2 border border-warning/30 bg-warning/10 text-warning rounded-xl text-sm hover:bg-warning/20 disabled:opacity-50 disabled:hover:bg-warning/10"
             >
               <RotateCcw size={14} /> Reset
+            </button>
+          </div>
+        </div>
+
+        <div className="glass p-6" style={{ borderColor: 'rgba(59, 130, 246, 0.2)' }}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-medium text-white">Reward History Archive</h3>
+              <p className="text-xs text-white/30 mt-1">
+                Older reward allocations are now cached in this browser so historical charts do not disappear when the API only returns recent data.
+              </p>
+              <p className="text-xs text-white/40 mt-2">
+                {archivedRewardCount} archived allocation{archivedRewardCount !== 1 ? 's' : ''}
+                {historyInfo?.oldestCompletedAt && ` · Oldest ${new Date(historyInfo.oldestCompletedAt).toLocaleDateString()}`}
+                {historyInfo?.newestCompletedAt && ` · Newest ${new Date(historyInfo.newestCompletedAt).toLocaleDateString()}`}
+              </p>
+              <p className="text-xs text-white/40 mt-1">
+                {historyStatusLabel}
+                {historyInfo?.lastBackfillAt && ` · Last checked ${new Date(historyInfo.lastBackfillAt).toLocaleString()}`}
+              </p>
+            </div>
+            <button
+              onClick={handleResetRewardHistory}
+              disabled={!hasArchivedRewardHistory}
+              className="flex items-center gap-2 px-4 py-2 border border-sky-400/30 bg-sky-400/10 text-sky-200 rounded-xl text-sm hover:bg-sky-400/20 disabled:opacity-50 disabled:hover:bg-sky-400/10"
+            >
+              <RotateCcw size={14} /> Reset Archive
             </button>
           </div>
         </div>

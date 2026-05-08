@@ -213,6 +213,12 @@ function formatUsdValue(value) {
   return `$${value.toFixed(2)}`;
 }
 
+function formatShareValue(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+
+  return `${value.toFixed(1)}%`;
+}
+
 function getDayLabel(dateValue) {
   return new Date(dateValue).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
@@ -479,6 +485,57 @@ export default function AnalyticsPage({ api }) {
     });
   }, [licenseAnalytics]);
 
+  const rewardConcentration = useMemo(() => {
+    const rewarded = licenseAnalytics
+      .filter((license) => license.totalMicros > 0)
+      .sort((left, right) => right.totalMicros - left.totalMicros);
+
+    if (!rewarded.length) {
+      return null;
+    }
+
+    const totalMicros = rewarded.reduce((sum, license) => sum + license.totalMicros, 0);
+    const shareForCount = (count) => rewarded.slice(0, count).reduce((sum, license) => sum + license.totalMicros, 0) / totalMicros * 100;
+    const topOneShare = shareForCount(1);
+    const topFiveShare = shareForCount(5);
+    const topTenShare = shareForCount(10);
+    const tailShare = Math.max(0, 100 - topTenShare);
+
+    let halfCoverageCount = 0;
+    let eightyCoverageCount = 0;
+    let cumulativeMicros = 0;
+
+    rewarded.forEach((license, index) => {
+      cumulativeMicros += license.totalMicros;
+      const cumulativeShare = cumulativeMicros / totalMicros;
+
+      if (!halfCoverageCount && cumulativeShare >= 0.5) {
+        halfCoverageCount = index + 1;
+      }
+
+      if (!eightyCoverageCount && cumulativeShare >= 0.8) {
+        eightyCoverageCount = index + 1;
+      }
+    });
+
+    return {
+      rewardedCount: rewarded.length,
+      topContributor: rewarded[0],
+      topOneShare: Number(topOneShare.toFixed(1)),
+      topFiveShare: Number(topFiveShare.toFixed(1)),
+      topTenShare: Number(topTenShare.toFixed(1)),
+      tailShare: Number(tailShare.toFixed(1)),
+      halfCoverageCount,
+      eightyCoverageCount,
+      segments: [
+        { label: 'Top 1', share: Number(topOneShare.toFixed(1)), color: '#22c55e' },
+        { label: 'Next 4', share: Number(Math.max(0, topFiveShare - topOneShare).toFixed(1)), color: '#818cf8' },
+        { label: 'Next 5', share: Number(Math.max(0, topTenShare - topFiveShare).toFixed(1)), color: '#06b6d4' },
+        { label: 'Tail', share: Number(tailShare.toFixed(1)), color: '#64748b' },
+      ].filter((segment) => segment.share > 0),
+    };
+  }, [licenseAnalytics]);
+
   const topDeviceRewards = useMemo(() => {
     const grouped = licenseAnalytics.reduce((map, license) => {
       const key = license.backendName || license.displayName;
@@ -495,6 +552,47 @@ export default function AnalyticsPage({ api }) {
       .map((entry) => ({ ...entry, amount: Number(entry.amount.toFixed(2)) }))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 8);
+  }, [licenseAnalytics]);
+
+  const operatorRewardMix = useMemo(() => {
+    const grouped = licenseAnalytics.reduce((map, license) => {
+      if (license.totalMicros <= 0) {
+        return map;
+      }
+
+      const key = license.operator || 'Unassigned';
+      if (!map[key]) {
+        map[key] = { name: key, amountMicros: 0, licenseCount: 0 };
+      }
+
+      map[key].amountMicros += license.totalMicros;
+      map[key].licenseCount += 1;
+      return map;
+    }, {});
+
+    const rows = Object.values(grouped)
+      .map((entry) => ({
+        ...entry,
+        amount: Number((entry.amountMicros / 1_000_000).toFixed(2)),
+      }))
+      .sort((left, right) => right.amount - left.amount);
+
+    if (!rows.length) {
+      return { rows: [], maxAmount: 0, topOperator: null };
+    }
+
+    const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+    const topRows = rows.slice(0, 6).map((row) => ({
+      ...row,
+      share: totalAmount ? Number(((row.amount / totalAmount) * 100).toFixed(1)) : 0,
+    }));
+
+    return {
+      rows: topRows,
+      maxAmount: topRows[0].amount,
+      topOperator: topRows[0],
+      othersCount: Math.max(0, rows.length - topRows.length),
+    };
   }, [licenseAnalytics]);
 
   const uptimeScatterData = useMemo(() => {
@@ -602,18 +700,16 @@ export default function AnalyticsPage({ api }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
-        <ChartCard
-          eyebrow="Reward Flow"
-          title="Combined daily earnings"
-          description="Shows total daily UP across all visible licenses, plus a 7-day earning trend and daily baseline."
-          className="xl:col-span-2"
-          footer={dailyTrendData.length ? `${dailyTrendData.length} day buckets in the visible range${dailyEarningsInsights ? ` · Best day ${dailyEarningsInsights.bestDay.label}` : ''}.` : 'No reward activity in this date range.'}
-        >
+      <ChartCard
+        eyebrow="Reward Flow"
+        title="Combined daily earnings"
+        description="Shows total daily UP across all visible licenses, plus a 7-day earning trend and daily baseline."
+        footer={dailyTrendData.length ? `${dailyTrendData.length} day buckets in the visible range${dailyEarningsInsights ? ` · Best day ${dailyEarningsInsights.bestDay.label}` : ''}.` : 'No reward activity in this date range.'}
+      >
           {dailyTrendData.length ? (
             <>
               {dailyEarningsInsights && (
-                <div className="grid grid-cols-2 xl:grid-cols-4 gap-2 mb-5">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-6">
                   <div className="glass-subtle rounded-xl p-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/30">Best Day</p>
                     <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(dailyEarningsInsights.bestDay.amount)}</p>
@@ -637,7 +733,7 @@ export default function AnalyticsPage({ api }) {
                 </div>
               )}
 
-              <ResponsiveContainer width="100%" height={340}>
+              <ResponsiveContainer width="100%" height={420}>
                 <ComposedChart data={dailyTrendData} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
                   <defs>
                     <linearGradient id="combinedDailyBar" x1="0" y1="0" x2="0" y2="1">
@@ -659,7 +755,7 @@ export default function AnalyticsPage({ api }) {
                     tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}
                     axisLine={false}
                     tickLine={false}
-                    minTickGap={20}
+                    minTickGap={26}
                   />
                   <YAxis
                     tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}
@@ -675,7 +771,7 @@ export default function AnalyticsPage({ api }) {
                       strokeDasharray="4 4"
                     />
                   )}
-                  <Bar dataKey="amount" radius={[8, 8, 2, 2]} maxBarSize={28}>
+                  <Bar dataKey="amount" radius={[8, 8, 2, 2]} maxBarSize={18}>
                     {dailyTrendData.map((entry) => (
                       <Cell
                         key={entry.dayKey}
@@ -710,9 +806,11 @@ export default function AnalyticsPage({ api }) {
               </div>
             </>
           ) : (
-            <div className="h-[340px] flex items-center justify-center text-sm text-white/30">No reward flow to chart yet.</div>
+            <div className="h-[420px] flex items-center justify-center text-sm text-white/30">No reward flow to chart yet.</div>
           )}
-        </ChartCard>
+      </ChartCard>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
 
         <ChartCard
           eyebrow="Fleet Health"
@@ -772,6 +870,68 @@ export default function AnalyticsPage({ api }) {
         </ChartCard>
 
         <ChartCard
+          eyebrow="Concentration"
+          title="Reward concentration profile"
+          description="Shows how dependent the visible range is on a small set of licenses versus the long tail."
+          footer={rewardConcentration ? `${rewardConcentration.halfCoverageCount} licenses generate half of the visible rewards.` : 'No rewarded licenses in this date range.'}
+        >
+          {rewardConcentration ? (
+            <>
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="glass-subtle rounded-xl p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Top 1</p>
+                  <p className="text-sm font-semibold text-white mt-1">{formatShareValue(rewardConcentration.topOneShare)}</p>
+                  <p className="text-[10px] text-white/35 mt-1">Single-license share</p>
+                </div>
+                <div className="glass-subtle rounded-xl p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Top 5</p>
+                  <p className="text-sm font-semibold text-white mt-1">{formatShareValue(rewardConcentration.topFiveShare)}</p>
+                  <p className="text-[10px] text-white/35 mt-1">Leader cluster share</p>
+                </div>
+                <div className="glass-subtle rounded-xl p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">Top 10</p>
+                  <p className="text-sm font-semibold text-white mt-1">{formatShareValue(rewardConcentration.topTenShare)}</p>
+                  <p className="text-[10px] text-white/35 mt-1">Extended leader share</p>
+                </div>
+                <div className="glass-subtle rounded-xl p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-white/30">80% Point</p>
+                  <p className="text-sm font-semibold text-white mt-1">{rewardConcentration.eightyCoverageCount}</p>
+                  <p className="text-[10px] text-white/35 mt-1">Licenses to reach 80%</p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-4">
+                <div className="flex h-3 rounded-full overflow-hidden bg-white/[0.05]">
+                  {rewardConcentration.segments.map((segment) => (
+                    <div
+                      key={segment.label}
+                      style={{ width: `${segment.share}%`, backgroundColor: segment.color }}
+                      title={`${segment.label}: ${segment.share}%`}
+                    />
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-4">
+                  {rewardConcentration.segments.map((segment) => (
+                    <div key={segment.label} className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-xs text-white/55">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
+                        <span>{segment.label}</span>
+                      </div>
+                      <span className="font-medium text-white">{formatShareValue(segment.share)}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-white/35 mt-4">
+                  {rewardConcentration.topContributor.displayName} is currently the heaviest individual contributor, while the tail still contributes {formatShareValue(rewardConcentration.tailShare)} of range rewards.
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-sm text-white/30">No rewarded licenses to profile yet.</div>
+          )}
+        </ChartCard>
+
+        <ChartCard
           eyebrow="Device Leaders"
           title="Top devices by rewards"
           description="Groups licenses by backend device name and ranks them by selected-range earnings."
@@ -802,6 +962,43 @@ export default function AnalyticsPage({ api }) {
             </ResponsiveContainer>
           ) : (
             <div className="h-[320px] flex items-center justify-center text-sm text-white/30">No device rewards to rank yet.</div>
+          )}
+        </ChartCard>
+
+        <ChartCard
+          eyebrow="Operator Mix"
+          title="Operator reward split"
+          description="Ranks operator assignments by selected-range reward output and license coverage."
+          footer={operatorRewardMix.topOperator ? `${operatorRewardMix.topOperator.name} leads operator output in the visible range.` : 'No operator-linked rewards in this date range.'}
+        >
+          {operatorRewardMix.rows.length ? (
+            <div className="space-y-3">
+              {operatorRewardMix.rows.map((entry, index) => (
+                <div key={entry.name} className="glass-subtle rounded-xl p-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{entry.name}</p>
+                      <p className="text-[10px] text-white/35 mt-1">{entry.licenseCount} license{entry.licenseCount !== 1 ? 's' : ''} · {formatShareValue(entry.share)}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-semibold text-white">{formatUsdValue(entry.amount)}</p>
+                      <p className="text-[10px] text-white/35 mt-1">Rank #{index + 1}</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-white/[0.05] overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${index === 0 ? 'bg-gradient-to-r from-emerald-400 to-cyan-400' : 'bg-gradient-to-r from-indigo-500 to-violet-400'}`}
+                      style={{ width: `${operatorRewardMix.maxAmount ? Math.max(8, (entry.amount / operatorRewardMix.maxAmount) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+              {operatorRewardMix.othersCount ? (
+                <p className="text-[11px] text-white/35">{operatorRewardMix.othersCount} additional operator bucket{operatorRewardMix.othersCount !== 1 ? 's' : ''} sit below the visible top list.</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="h-[320px] flex items-center justify-center text-sm text-white/30">No operator-linked rewards to compare yet.</div>
           )}
         </ChartCard>
 

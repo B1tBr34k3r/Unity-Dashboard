@@ -138,10 +138,10 @@ export async function getRewardsBalance() {
   return request('/rest/v1/rpc/rewards_get_balance', { method: 'POST' });
 }
 
-export async function getRewardsAllocations() {
+export async function getRewardsAllocations({ skip = null, take = null } = {}) {
   return request('/rest/v1/rpc/rewards_get_allocations', {
     method: 'POST',
-    body: { skip: null, take: null },
+    body: { skip, take },
   });
 }
 
