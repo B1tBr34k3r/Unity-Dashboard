@@ -18,7 +18,7 @@ import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRa
 export default function LicenseDetailPage({ api }) {
   const { id } = useParams();
   const decodedId = decodeURIComponent(id);
-  const { allocations, licenses: licenseMetadata, isLoading } = api;
+  const { user, allocations, licenses: licenseMetadata, isLoading } = api;
 
   // All daily reward logs for this license
   const allLogs = useMemo(() => {
@@ -34,9 +34,9 @@ export default function LicenseDetailPage({ api }) {
   const hasRewardData = allLogs.length > 0;
 
   const totalReward = logs.reduce((sum, a) => sum + a.amountMicros, 0);
-  const { getLabel, setLabel } = useLicenseLabels();
-  const { getPresetTag, setPresetTag, presetTags } = useLicensePresetTags();
-  const { getOperator, setOperator, allOperators } = useOperatorTags();
+  const { getLabel, setLabel } = useLicenseLabels(user?.id);
+  const { getPresetTag, setPresetTag, presetTags } = useLicensePresetTags(user?.id);
+  const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
 
   // Chart data
   const chartData = logs.map((a) => ({

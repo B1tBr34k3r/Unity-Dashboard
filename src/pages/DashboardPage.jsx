@@ -9,9 +9,9 @@ import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
 
 export default function DashboardPage({ api }) {
-  const { balance, allocations, summary, historyInfo, isLoading, error, refetch } = api;
+  const { user, balance, allocations, summary, historyInfo, isLoading, error, refetch } = api;
   const summaryData = summary?.[0] || null;
-  const { getOperator, allOperators } = useOperatorTags();
+  const { getOperator, allOperators } = useOperatorTags(user?.id);
   const dateRange = useDateRangeFilter(allocations, (item) => item.completedAt, 'page-state:dashboard');
   const filteredAllocations = dateRange.filtered;
 

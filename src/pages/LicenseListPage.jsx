@@ -77,11 +77,11 @@ function isBelowMinUptime(license) {
 }
 
 export default function LicenseListPage({ api }) {
-  const { allocations, licenses: licenseMetadata, summary, isLoading, refetch } = api;
+  const { user, allocations, licenses: licenseMetadata, summary, isLoading, refetch } = api;
   const summaryData = summary?.[0] || null;
-  const { getLabel, setLabel } = useLicenseLabels();
-  const { getPresetTag, setPresetTag, tagPresets, presetTags } = useLicensePresetTags();
-  const { getOperator, setOperator, allOperators } = useOperatorTags();
+  const { getLabel, setLabel } = useLicenseLabels(user?.id);
+  const { getPresetTag, setPresetTag, tagPresets, presetTags } = useLicensePresetTags(user?.id);
+  const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
   const navigate = useNavigate();
   const [search, setSearch] = usePersistentPageState('page-state:licenses:search', '');
   const [sortBy, setSortBy] = usePersistentPageState('page-state:licenses:sort-by', 'totalMicros');

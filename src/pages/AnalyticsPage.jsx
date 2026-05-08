@@ -254,10 +254,10 @@ function getStatusBucket(license) {
 }
 
 export default function AnalyticsPage({ api }) {
-  const { balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, refetch } = api;
-  const { getLabel } = useLicenseLabels();
-  const { getPresetTag, presetTags } = useLicensePresetTags();
-  const { getOperator } = useOperatorTags();
+  const { user, balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, refetch } = api;
+  const { getLabel } = useLicenseLabels(user?.id);
+  const { getPresetTag, presetTags } = useLicensePresetTags(user?.id);
+  const { getOperator } = useOperatorTags(user?.id);
   const dateRange = useDateRangeFilter(allocations || [], (item) => item.completedAt, 'page-state:analytics');
   const filteredAllocations = dateRange.filtered || [];
 
