@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { sendOtp, verifyOtp, loginWithToken, getUser } from '../data/apiAdapter';
+import { sendOtp, verifyOtp, loginWithToken, getUser, signInWithMetaMask } from '../data/apiAdapter';
 import toast from 'react-hot-toast';
 import { Mail, KeyRound, ChevronRight } from 'lucide-react';
 
@@ -8,12 +8,14 @@ export default function LoginPage({ onLogin }) {
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [token, setToken] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState(null);
+
+  const isLoading = Boolean(loadingAction);
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
     if (!email.trim()) return;
-    setLoading(true);
+    setLoadingAction('email');
     try {
       await sendOtp(email.trim());
       toast.success('OTP sent! Check your email');
@@ -21,14 +23,14 @@ export default function LoginPage({ onLogin }) {
     } catch (err) {
       toast.error(err.message);
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
   const handleVerifyOtp = async (e) => {
     e.preventDefault();
     if (!otp.trim()) return;
-    setLoading(true);
+    setLoadingAction('otp');
     try {
       await verifyOtp(email.trim(), otp.trim());
       toast.success('Logged in successfully');
@@ -36,7 +38,7 @@ export default function LoginPage({ onLogin }) {
     } catch (err) {
       toast.error(err.message);
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
@@ -44,7 +46,7 @@ export default function LoginPage({ onLogin }) {
     e.preventDefault();
     const cleaned = token.trim().replace(/^Bearer\s+/i, '');
     if (!cleaned) return;
-    setLoading(true);
+    setLoadingAction('token');
     try {
       loginWithToken(cleaned);
       await getUser();
@@ -53,12 +55,27 @@ export default function LoginPage({ onLogin }) {
     } catch {
       toast.error('Invalid or expired token');
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
+    }
+  };
+
+  const handleMetaMaskLogin = async () => {
+    setLoadingAction('metamask');
+    try {
+      await signInWithMetaMask();
+      toast.success('Connected with MetaMask');
+      onLogin();
+    } catch (err) {
+      toast.error(err.message || 'MetaMask sign-in failed');
+    } finally {
+      setLoadingAction(null);
     }
   };
 
   const inputClass =
     'w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:border-accent/50 focus:bg-white/[0.06] backdrop-blur transition-all';
+  const secondaryButtonClass =
+    'w-full flex items-center justify-center gap-2 py-3 border border-white/[0.08] bg-white/[0.04] rounded-xl text-sm text-white hover:bg-white/[0.06] disabled:opacity-50';
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 relative z-10">
@@ -70,19 +87,32 @@ export default function LoginPage({ onLogin }) {
         </div>
 
         {step === 'email' && (
-          <form onSubmit={handleSendOtp} className="glass-strong p-6 space-y-4 glow-accent">
-            <div>
-              <label className="block text-xs font-medium text-white/50 mb-2">Email</label>
-              <div className="relative">
-                <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass + ' pl-10'} autoFocus />
+          <div className="glass-strong p-6 space-y-4 glow-accent">
+            <form onSubmit={handleSendOtp} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-white/50 mb-2">Email</label>
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className={inputClass + ' pl-10'} autoFocus />
+                </div>
               </div>
+              <button type="submit" disabled={isLoading || !email.trim()} className="w-full flex items-center justify-center gap-2 py-3 btn-gradient rounded-xl text-sm disabled:opacity-50">
+                {loadingAction === 'email' ? 'Sending...' : 'Send OTP'}
+                {loadingAction !== 'email' && <ChevronRight size={16} />}
+              </button>
+            </form>
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-white/[0.08]" />
+              <span className="text-[10px] uppercase tracking-[0.3em] text-white/25">or</span>
+              <div className="h-px flex-1 bg-white/[0.08]" />
             </div>
-            <button type="submit" disabled={loading || !email.trim()} className="w-full flex items-center justify-center gap-2 py-3 btn-gradient rounded-xl text-sm disabled:opacity-50">
-              {loading ? 'Sending...' : 'Send OTP'}
-              {!loading && <ChevronRight size={16} />}
+            <button type="button" onClick={handleMetaMaskLogin} disabled={isLoading} className={secondaryButtonClass}>
+              {loadingAction === 'metamask' ? 'Connecting...' : 'Sign In With MetaMask'}
             </button>
-          </form>
+            <p className="text-xs text-white/30 text-center">
+              Use the MetaMask wallet linked to your Unity account.
+            </p>
+          </div>
         )}
 
         {step === 'otp' && (
@@ -97,12 +127,12 @@ export default function LoginPage({ onLogin }) {
                 <input type="text" value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" className={inputClass + ' pl-10 text-center tracking-[0.3em] text-lg'} autoFocus maxLength={6} />
               </div>
             </div>
-            <button type="submit" disabled={loading || !otp.trim()} className="w-full py-3 btn-gradient rounded-xl text-sm disabled:opacity-50">
-              {loading ? 'Verifying...' : 'Verify & Login'}
+            <button type="submit" disabled={isLoading || !otp.trim()} className="w-full py-3 btn-gradient rounded-xl text-sm disabled:opacity-50">
+              {loadingAction === 'otp' ? 'Verifying...' : 'Verify & Login'}
             </button>
             <div className="flex items-center justify-between">
               <button type="button" onClick={() => { setStep('email'); setOtp(''); }} className="text-xs text-white/30 hover:text-white/60">Change email</button>
-              <button type="button" onClick={async () => { try { await sendOtp(email.trim()); toast.success('OTP resent'); } catch (err) { toast.error(err.message); } }} className="text-xs text-accent-light hover:text-accent">Resend OTP</button>
+              <button type="button" onClick={async () => { try { setLoadingAction('email'); await sendOtp(email.trim()); toast.success('OTP resent'); } catch (err) { toast.error(err.message); } finally { setLoadingAction(null); } }} className="text-xs text-accent-light hover:text-accent">Resend OTP</button>
             </div>
           </form>
         )}
@@ -113,8 +143,8 @@ export default function LoginPage({ onLogin }) {
               <label className="block text-xs font-medium text-white/50 mb-2">Bearer Token</label>
               <textarea value={token} onChange={(e) => setToken(e.target.value)} placeholder="eyJhbGciOiJIUzI1NiIs..." rows={4} className={inputClass + ' resize-none font-mono text-xs'} autoFocus />
             </div>
-            <button type="submit" disabled={loading || !token.trim()} className="w-full py-3 btn-gradient rounded-xl text-sm disabled:opacity-50">
-              {loading ? 'Verifying...' : 'Connect'}
+            <button type="submit" disabled={isLoading || !token.trim()} className="w-full py-3 btn-gradient rounded-xl text-sm disabled:opacity-50">
+              {loadingAction === 'token' ? 'Verifying...' : 'Connect'}
             </button>
           </form>
         )}
