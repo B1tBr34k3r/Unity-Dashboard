@@ -168,16 +168,6 @@ function getApiErrorMessage(errorPayload, fallbackMessage) {
 
   const primaryMessage = errorPayload.error_description || errorPayload.msg || errorPayload.message;
 
-  if (typeof primaryMessage === 'string') {
-    if (primaryMessage.includes('Signed Ethereum message is using URI which is not allowed on this server')) {
-      return 'MetaMask login is not enabled for this site domain yet. Unity only accepts Web3 sign-in from approved app URLs, so this Vercel domain is currently blocked.';
-    }
-
-    if (primaryMessage.includes('message was signed for another app')) {
-      return 'MetaMask login is not enabled for this site domain yet. The signed message was rejected because Unity only accepts Web3 sign-in from approved app URLs.';
-    }
-  }
-
   if (primaryMessage && errorPayload.hint) {
     return `${primaryMessage} ${errorPayload.hint}`;
   }
