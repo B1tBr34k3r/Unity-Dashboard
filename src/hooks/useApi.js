@@ -8,6 +8,7 @@ import {
   getRewardsAllocationsSummary,
   refreshSession,
   clearToken,
+  clearRefreshToken,
 } from '../data/apiAdapter';
 import {
   buildRewardHistoryMeta,
@@ -291,7 +292,7 @@ export function useApi() {
 
   const logout = () => {
     clearToken();
-    localStorage.removeItem('unity_edge_refresh_token');
+    clearRefreshToken();
     clearPersistentPageState();
     latestAllocationsRef.current = [];
     currentUserIdRef.current = null;

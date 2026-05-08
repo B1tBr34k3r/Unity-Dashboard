@@ -5,6 +5,56 @@
 
 const BASE_URL = 'https://api.unityedge.io';
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const TOKEN_STORAGE_KEY = 'unity_edge_token';
+const REFRESH_TOKEN_STORAGE_KEY = 'unity_edge_refresh_token';
+
+function readSessionValue(storageKey) {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return window.sessionStorage.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionValue(storageKey, value) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(storageKey, value);
+  } catch {
+    // Ignore storage write failures and let auth requests fail naturally.
+  }
+
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore cleanup failures for old persistent auth keys.
+  }
+}
+
+function removeSessionValue(storageKey) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.sessionStorage.removeItem(storageKey);
+  } catch {
+    // Ignore session storage failures.
+  }
+
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore cleanup failures for old persistent auth keys.
+  }
+}
 
 function getAnonKey() {
   if (!ANON_KEY) {
@@ -31,15 +81,27 @@ function getApiErrorMessage(errorPayload, fallbackMessage) {
 // --- Auth helpers ---
 
 function getToken() {
-  return localStorage.getItem('unity_edge_token');
+  return readSessionValue(TOKEN_STORAGE_KEY);
 }
 
 export function setToken(token) {
-  localStorage.setItem('unity_edge_token', token);
+  writeSessionValue(TOKEN_STORAGE_KEY, token);
 }
 
 export function clearToken() {
-  localStorage.removeItem('unity_edge_token');
+  removeSessionValue(TOKEN_STORAGE_KEY);
+}
+
+function getRefreshToken() {
+  return readSessionValue(REFRESH_TOKEN_STORAGE_KEY);
+}
+
+function setRefreshToken(refreshToken) {
+  writeSessionValue(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+}
+
+export function clearRefreshToken() {
+  removeSessionValue(REFRESH_TOKEN_STORAGE_KEY);
 }
 
 export function isAuthenticated() {
@@ -120,7 +182,7 @@ export async function verifyOtp(email, otpCode) {
   const data = await res.json();
   setToken(data.access_token);
   if (data.refresh_token) {
-    localStorage.setItem('unity_edge_refresh_token', data.refresh_token);
+    setRefreshToken(data.refresh_token);
   }
   return data;
 }
@@ -135,7 +197,7 @@ export async function getUser() {
 }
 
 export async function refreshSession() {
-  const refreshToken = localStorage.getItem('unity_edge_refresh_token');
+  const refreshToken = getRefreshToken();
   if (!refreshToken) throw new Error('No refresh token');
   const anonKey = getAnonKey();
 
@@ -156,7 +218,7 @@ export async function refreshSession() {
   const data = await res.json();
   setToken(data.access_token);
   if (data.refresh_token) {
-    localStorage.setItem('unity_edge_refresh_token', data.refresh_token);
+    setRefreshToken(data.refresh_token);
   }
   return data;
 }
