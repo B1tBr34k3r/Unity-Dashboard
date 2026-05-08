@@ -6,6 +6,28 @@
 const BASE_URL = 'https://api.unityedge.io';
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
+function getAnonKey() {
+  if (!ANON_KEY) {
+    throw new Error('Missing VITE_SUPABASE_ANON_KEY. Add it in Vercel Project Settings -> Environment Variables, then redeploy.');
+  }
+
+  return ANON_KEY;
+}
+
+function getApiErrorMessage(errorPayload, fallbackMessage) {
+  if (!errorPayload || typeof errorPayload !== 'object') {
+    return fallbackMessage;
+  }
+
+  const primaryMessage = errorPayload.error_description || errorPayload.msg || errorPayload.message;
+
+  if (primaryMessage && errorPayload.hint) {
+    return `${primaryMessage} ${errorPayload.hint}`;
+  }
+
+  return primaryMessage || errorPayload.hint || fallbackMessage;
+}
+
 // --- Auth helpers ---
 
 function getToken() {
@@ -28,6 +50,7 @@ export function isAuthenticated() {
 
 async function request(path, { method = 'GET', body, params, headers: extraHeaders } = {}) {
   const token = getToken();
+  const anonKey = getAnonKey();
   const url = new URL(`${BASE_URL}${path}`);
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -37,7 +60,7 @@ async function request(path, { method = 'GET', body, params, headers: extraHeade
     method,
     headers: {
       'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
+      'apikey': anonKey,
       ...(token && { Authorization: `Bearer ${token}` }),
       ...extraHeaders,
     },
@@ -60,36 +83,38 @@ async function request(path, { method = 'GET', body, params, headers: extraHeade
 
 // OTP: send magic link to email
 export async function sendOtp(email) {
+  const anonKey = getAnonKey();
   const res = await fetch(`${BASE_URL}/auth/v1/otp`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
+      'apikey': anonKey,
     },
     body: JSON.stringify({ email }),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error_description || err.msg || 'Failed to send OTP');
+    throw new Error(getApiErrorMessage(err, 'Failed to send OTP'));
   }
   return true;
 }
 
 // OTP: verify code from email
 export async function verifyOtp(email, otpCode) {
+  const anonKey = getAnonKey();
   const res = await fetch(`${BASE_URL}/auth/v1/verify`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
+      'apikey': anonKey,
     },
     body: JSON.stringify({ email, token: otpCode, type: 'email' }),
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error_description || err.msg || err.message || 'Invalid OTP code');
+    throw new Error(getApiErrorMessage(err, 'Invalid OTP code'));
   }
 
   const data = await res.json();
@@ -112,17 +137,21 @@ export async function getUser() {
 export async function refreshSession() {
   const refreshToken = localStorage.getItem('unity_edge_refresh_token');
   if (!refreshToken) throw new Error('No refresh token');
+  const anonKey = getAnonKey();
 
   const res = await fetch(`${BASE_URL}/auth/v1/token?grant_type=refresh_token`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
+      'apikey': anonKey,
     },
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
 
-  if (!res.ok) throw new Error('Session refresh failed');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(getApiErrorMessage(err, 'Session refresh failed'));
+  }
 
   const data = await res.json();
   setToken(data.access_token);
@@ -154,6 +183,7 @@ export async function getRewardsAllocationsSummary(limit = 30) {
 
 export async function getLicenses({ role = 'ulo', pageSize = 100 } = {}) {
   const token = getToken();
+  const anonKey = getAnonKey();
   const licenses = [];
 
   for (let page = 1; page <= 50; page += 1) {
@@ -161,7 +191,7 @@ export async function getLicenses({ role = 'ulo', pageSize = 100 } = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': ANON_KEY,
+        'apikey': anonKey,
         ...(token && { Authorization: `Bearer ${token}` }),
       },
       body: JSON.stringify({
@@ -206,11 +236,12 @@ export async function getWithdrawals() {
 
 export async function requestWithdrawalQuote({ amountMicros, walletAddress, chain, asset }) {
   const token = getToken();
+  const anonKey = getAnonKey();
   const res = await fetch(`${BASE_URL}/functions/v1/rewards_request_withdrawal_quote`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
+      'apikey': anonKey,
       ...(token && { Authorization: `Bearer ${token}` }),
     },
     body: JSON.stringify({ amountMicros, walletAddress, chain, asset, timestamp: Date.now() }),
@@ -230,11 +261,12 @@ export async function requestWithdrawalQuote({ amountMicros, walletAddress, chai
 
 export async function submitWithdrawal({ quote, walletAddress, chain }) {
   const token = getToken();
+  const anonKey = getAnonKey();
   const res = await fetch(`${BASE_URL}/functions/v1/rewards_request_withdrawal`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
+      'apikey': anonKey,
       ...(token && { Authorization: `Bearer ${token}` }),
     },
     body: JSON.stringify({
