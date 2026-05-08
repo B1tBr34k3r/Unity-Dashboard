@@ -500,16 +500,11 @@ export default function AnalyticsPage({ api }) {
 
     const bestDay = dailyTrendData.reduce((bestEntry, entry) => (entry.amount > bestEntry.amount ? entry : bestEntry), dailyTrendData[0]);
     const latestDay = dailyTrendData[dailyTrendData.length - 1];
-    const strongestRunRateDay = dailyTrendData.reduce(
-      (bestEntry, entry) => (entry.rollingAverage > bestEntry.rollingAverage ? entry : bestEntry),
-      dailyTrendData[0]
-    );
     const averagePerDay = dailyTrendData.reduce((sum, entry) => sum + entry.amount, 0) / dailyTrendData.length;
 
     return {
       bestDay,
       latestDay,
-      strongestRunRateDay,
       averagePerDay: Number(averagePerDay.toFixed(2)),
     };
   }, [dailyTrendData]);
@@ -772,7 +767,7 @@ export default function AnalyticsPage({ api }) {
               ) : null}
 
               {dailyEarningsInsights && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-6">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 mb-6">
                   <div className="glass-subtle rounded-xl p-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/30">Best Day</p>
                     <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(dailyEarningsInsights.bestDay.amount)}</p>
@@ -787,11 +782,6 @@ export default function AnalyticsPage({ api }) {
                     <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Day</p>
                     <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(dailyEarningsInsights.latestDay.amount)}</p>
                     <p className="text-[10px] text-white/35 mt-1">{dailyEarningsInsights.latestDay.label}</p>
-                  </div>
-                  <div className="glass-subtle rounded-xl p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-white/30">Latest 7d Avg</p>
-                    <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(dailyEarningsInsights.latestDay.rollingAverage)}</p>
-                    <p className="text-[10px] text-white/35 mt-1">Window ending {dailyEarningsInsights.latestDay.label}</p>
                   </div>
                 </div>
               )}
