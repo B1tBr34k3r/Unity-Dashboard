@@ -13,57 +13,87 @@ const USER_STORAGE_KEY = 'unity_edge_user';
 const CUSTOM_DASHBOARD_DATA_METADATA_KEY = 'unity_dashboard_custom_data';
 const CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS = 150;
 const pendingCustomDashboardSyncs = new Map();
+let refreshSessionPromise = null;
 
-function readSessionValue(storageKey) {
+function readStoredValue(storageKey) {
   if (typeof window === 'undefined') {
     return null;
   }
 
   try {
-    return window.sessionStorage.getItem(storageKey);
+    const persistedValue = window.localStorage.getItem(storageKey);
+
+    if (persistedValue !== null) {
+      return persistedValue;
+    }
+  } catch {
+    // Ignore local storage read failures and fall back to session storage.
+  }
+
+  try {
+    const sessionValue = window.sessionStorage.getItem(storageKey);
+
+    if (sessionValue !== null) {
+      try {
+        window.localStorage.setItem(storageKey, sessionValue);
+      } catch {
+        // Ignore migration failures and keep the current session alive.
+      }
+
+      return sessionValue;
+    }
   } catch {
     return null;
   }
+
+  return null;
 }
 
-function writeSessionValue(storageKey, value) {
+function writeStoredValue(storageKey, value) {
   if (typeof window === 'undefined') {
     return;
   }
 
+  let wrotePersistentValue = false;
+
   try {
-    window.sessionStorage.setItem(storageKey, value);
+    window.localStorage.setItem(storageKey, value);
+    wrotePersistentValue = true;
   } catch {
-    // Ignore storage write failures and let auth requests fail naturally.
+    // Ignore persistent storage failures and fall back to session storage.
+  }
+
+  try {
+    if (wrotePersistentValue) {
+      window.sessionStorage.removeItem(storageKey);
+    } else {
+      window.sessionStorage.setItem(storageKey, value);
+    }
+  } catch {
+    // Ignore storage sync failures and let auth requests fail naturally.
+  }
+}
+
+function removeStoredValue(storageKey) {
+  if (typeof window === 'undefined') {
+    return;
   }
 
   try {
     window.localStorage.removeItem(storageKey);
   } catch {
-    // Ignore cleanup failures for old persistent auth keys.
-  }
-}
-
-function removeSessionValue(storageKey) {
-  if (typeof window === 'undefined') {
-    return;
+    // Ignore local storage cleanup failures.
   }
 
   try {
     window.sessionStorage.removeItem(storageKey);
   } catch {
-    // Ignore session storage failures.
-  }
-
-  try {
-    window.localStorage.removeItem(storageKey);
-  } catch {
-    // Ignore cleanup failures for old persistent auth keys.
+    // Ignore session storage cleanup failures.
   }
 }
 
 function readStoredUser() {
-  const rawUser = readSessionValue(USER_STORAGE_KEY);
+  const rawUser = readStoredValue(USER_STORAGE_KEY);
 
   if (!rawUser) {
     return null;
@@ -78,15 +108,15 @@ function readStoredUser() {
 
 function writeStoredUser(user) {
   if (!user || typeof user !== 'object') {
-    removeSessionValue(USER_STORAGE_KEY);
+    removeStoredValue(USER_STORAGE_KEY);
     return;
   }
 
-  writeSessionValue(USER_STORAGE_KEY, JSON.stringify(user));
+  writeStoredValue(USER_STORAGE_KEY, JSON.stringify(user));
 }
 
 function clearStoredUser() {
-  removeSessionValue(USER_STORAGE_KEY);
+  removeStoredValue(USER_STORAGE_KEY);
 }
 
 function getAnonKey() {
@@ -114,28 +144,28 @@ function getApiErrorMessage(errorPayload, fallbackMessage) {
 // --- Auth helpers ---
 
 function getToken() {
-  return readSessionValue(TOKEN_STORAGE_KEY);
+  return readStoredValue(TOKEN_STORAGE_KEY);
 }
 
 export function setToken(token) {
-  writeSessionValue(TOKEN_STORAGE_KEY, token);
+  writeStoredValue(TOKEN_STORAGE_KEY, token);
 }
 
 export function clearToken() {
-  removeSessionValue(TOKEN_STORAGE_KEY);
+  removeStoredValue(TOKEN_STORAGE_KEY);
   clearStoredUser();
 }
 
 function getRefreshToken() {
-  return readSessionValue(REFRESH_TOKEN_STORAGE_KEY);
+  return readStoredValue(REFRESH_TOKEN_STORAGE_KEY);
 }
 
 function setRefreshToken(refreshToken) {
-  writeSessionValue(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+  writeStoredValue(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
 }
 
 export function clearRefreshToken() {
-  removeSessionValue(REFRESH_TOKEN_STORAGE_KEY);
+  removeStoredValue(REFRESH_TOKEN_STORAGE_KEY);
 }
 
 export function isAuthenticated() {
@@ -145,28 +175,17 @@ export function isAuthenticated() {
 // --- Core request ---
 
 async function request(path, { method = 'GET', body, params, headers: extraHeaders } = {}) {
-  const token = getToken();
-  const anonKey = getAnonKey();
   const url = new URL(`${BASE_URL}${path}`);
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   }
 
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithAuth(url.toString(), {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': anonKey,
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...extraHeaders,
-    },
-    ...(body && { body: JSON.stringify(body) }),
+    headers: extraHeaders,
+    body,
   });
 
-  if (res.status === 401) {
-    clearToken();
-    throw new Error('Session expired. Please log in again.');
-  }
   if (!res.ok) {
     const err = await res.text().catch(() => '');
     throw new Error(`API error ${res.status}: ${err}`);
@@ -232,34 +251,104 @@ export async function getUser() {
   return user;
 }
 
-export async function refreshSession() {
+async function refreshSessionInternal() {
+  if (refreshSessionPromise) {
+    return refreshSessionPromise;
+  }
+
   const refreshToken = getRefreshToken();
-  if (!refreshToken) throw new Error('No refresh token');
+  if (!refreshToken) {
+    clearToken();
+    clearRefreshToken();
+    throw new Error('No refresh token');
+  }
+
+  refreshSessionPromise = (async () => {
+    const anonKey = getAnonKey();
+    const res = await fetch(`${BASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      clearToken();
+      clearRefreshToken();
+      throw new Error(getApiErrorMessage(err, 'Session refresh failed'));
+    }
+
+    const data = await res.json();
+    setToken(data.access_token);
+    if (data.refresh_token) {
+      setRefreshToken(data.refresh_token);
+    }
+    if (data.user) {
+      writeStoredUser(data.user);
+    }
+
+    return data;
+  })();
+
+  try {
+    return await refreshSessionPromise;
+  } finally {
+    refreshSessionPromise = null;
+  }
+}
+
+export async function refreshSession() {
+  return refreshSessionInternal();
+}
+
+function buildAuthHeaders(extraHeaders = {}) {
+  const token = getToken();
   const anonKey = getAnonKey();
 
-  const res = await fetch(`${BASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': anonKey,
-    },
-    body: JSON.stringify({ refresh_token: refreshToken }),
+  return {
+    'Content-Type': 'application/json',
+    'apikey': anonKey,
+    ...(token && { Authorization: `Bearer ${token}` }),
+    ...extraHeaders,
+  };
+}
+
+function buildRequestBody(body) {
+  if (body === undefined || body === null) {
+    return undefined;
+  }
+
+  return JSON.stringify(body);
+}
+
+async function fetchWithAuth(url, { method = 'GET', body, headers: extraHeaders } = {}) {
+  const makeRequest = () => fetch(url, {
+    method,
+    headers: buildAuthHeaders(extraHeaders),
+    ...(body !== undefined && body !== null ? { body: buildRequestBody(body) } : {}),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(getApiErrorMessage(err, 'Session refresh failed'));
+  let res = await makeRequest();
+
+  if (res.status === 401 && getRefreshToken()) {
+    try {
+      await refreshSessionInternal();
+      res = await makeRequest();
+    } catch {
+      throw new Error('Session expired. Please log in again.');
+    }
   }
 
-  const data = await res.json();
-  setToken(data.access_token);
-  if (data.refresh_token) {
-    setRefreshToken(data.refresh_token);
+  if (res.status === 401) {
+    clearToken();
+    clearRefreshToken();
+    throw new Error('Session expired. Please log in again.');
   }
-  if (data.user) {
-    writeStoredUser(data.user);
-  }
-  return data;
+
+  return res;
 }
 
 export function getCustomDashboardDataFromUser(user) {
@@ -388,31 +477,19 @@ export async function getRewardsAllocationsSummary(limit = 30) {
 }
 
 export async function getLicenses({ role = 'ulo', pageSize = 100 } = {}) {
-  const token = getToken();
-  const anonKey = getAnonKey();
   const licenses = [];
 
   for (let page = 1; page <= 50; page += 1) {
-    const res = await fetch(`${BASE_URL}/functions/v1/licenses_get_licenses`, {
+    const res = await fetchWithAuth(`${BASE_URL}/functions/v1/licenses_get_licenses`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': anonKey,
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: JSON.stringify({
+      body: {
         role,
         page,
         pageSize,
         skip: (page - 1) * pageSize,
         take: pageSize,
-      }),
+      },
     });
-
-    if (res.status === 401) {
-      clearToken();
-      throw new Error('Session expired. Please log in again.');
-    }
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -441,22 +518,11 @@ export async function getWithdrawals() {
 }
 
 export async function requestWithdrawalQuote({ amountMicros, walletAddress, chain, asset }) {
-  const token = getToken();
-  const anonKey = getAnonKey();
-  const res = await fetch(`${BASE_URL}/functions/v1/rewards_request_withdrawal_quote`, {
+  const res = await fetchWithAuth(`${BASE_URL}/functions/v1/rewards_request_withdrawal_quote`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': anonKey,
-      ...(token && { Authorization: `Bearer ${token}` }),
-    },
-    body: JSON.stringify({ amountMicros, walletAddress, chain, asset, timestamp: Date.now() }),
+    body: { amountMicros, walletAddress, chain, asset, timestamp: Date.now() },
   });
 
-  if (res.status === 401) {
-    clearToken();
-    throw new Error('Session expired. Please log in again.');
-  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Quote request failed (${res.status})`);
@@ -466,29 +532,18 @@ export async function requestWithdrawalQuote({ amountMicros, walletAddress, chai
 }
 
 export async function submitWithdrawal({ quote, walletAddress, chain }) {
-  const token = getToken();
-  const anonKey = getAnonKey();
-  const res = await fetch(`${BASE_URL}/functions/v1/rewards_request_withdrawal`, {
+  const res = await fetchWithAuth(`${BASE_URL}/functions/v1/rewards_request_withdrawal`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': anonKey,
-      ...(token && { Authorization: `Bearer ${token}` }),
-    },
-    body: JSON.stringify({
+    body: {
       type: 'crypto',
       chain,
       asset: quote.asset,
       assetAmount: quote.assetAmount,
       quote,
       walletAddress,
-    }),
+    },
   });
 
-  if (res.status === 401) {
-    clearToken();
-    throw new Error('Session expired. Please log in again.');
-  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Withdrawal failed (${res.status})`);
