@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { pushLocalCustomDashboardDataToProfile } from '../data/apiAdapter';
 import { clearOperators, normalizeOperators, readOperators, writeOperators } from '../data/customDashboardDataStorage';
 
 export function useOperatorTags(userId) {
@@ -19,7 +18,6 @@ export function useOperatorTags(userId) {
         delete next[licenseId];
       }
       writeOperators(userId, next);
-      void pushLocalCustomDashboardDataToProfile(userId);
       return next;
     });
   }, [userId]);
@@ -28,7 +26,6 @@ export function useOperatorTags(userId) {
     const normalized = normalizeOperators(nextOperators);
     writeOperators(userId, normalized);
     setOperators(normalized);
-    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   const getOperator = useCallback(
@@ -39,7 +36,6 @@ export function useOperatorTags(userId) {
   const resetOperators = useCallback(() => {
     clearOperators(userId);
     setOperators({});
-    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   // All unique operator names (sorted)

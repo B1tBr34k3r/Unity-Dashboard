@@ -154,38 +154,6 @@ export function PayoutWalletsSkeleton() {
   );
 }
 
-export function WithdrawalSkeleton() {
-  return (
-    <div className="space-y-6 max-w-lg mx-auto">
-      <div>
-        <Skeleton className="h-7 w-32 mb-2" />
-        <Skeleton className="h-4 w-56" />
-      </div>
-      <div className="glass p-5 sm:p-6 space-y-6">
-        <div className="space-y-2">
-          <Skeleton className="h-5 w-36" />
-          <Skeleton className="h-4 w-48" />
-          <div className="shimmer h-12 w-full rounded-xl" />
-        </div>
-        <div className="space-y-2">
-          <Skeleton className="h-5 w-32" />
-          <div className="shimmer h-12 w-full rounded-xl" />
-          <Skeleton className="h-3 w-full max-w-xs" />
-        </div>
-        <div className="space-y-2">
-          <Skeleton className="h-5 w-28" />
-          <div className="flex flex-wrap gap-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="shimmer h-9 w-28 rounded-lg" />
-            ))}
-          </div>
-        </div>
-        <div className="shimmer h-12 w-full rounded-xl" />
-      </div>
-    </div>
-  );
-}
-
 export function LicenseDetailSkeleton() {
   return (
     <div>

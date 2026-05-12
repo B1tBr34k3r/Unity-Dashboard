@@ -1,11 +1,11 @@
 # Unity Dashboard
 
-Unity Dashboard is a React + Vite operations dashboard for working with Unity Edge / Unity Nodes account data. It combines official license metadata from the Unity backend with reward and withdrawal data, then layers local productivity features on top for naming, tagging, filtering, analytics, and day-to-day tracking.
+Unity Dashboard is a React + Vite operations dashboard for working with Unity Edge / Unity Nodes account data. It combines official license metadata from the Unity backend with reward data, then layers local productivity features on top for naming, tagging, filtering, analytics, and day-to-day tracking.
 
 ## What This App Does
 
 - Authenticates against the Unity Edge API from the browser.
-- Pulls reward balance, allocations, summaries, withdrawals, and official license metadata.
+- Pulls reward balance, allocations, summaries, and official license metadata.
 - Merges official license records with reward history so licenses still appear even when they have zero rewards.
 - Supports custom labels, operator assignments, preset tags, clone numbering, and filter persistence.
 - Shows ULO and UNO distribution, lease time left, uptime, and online state for licenses.
@@ -18,7 +18,7 @@ Unity Dashboard is a React + Vite operations dashboard for working with Unity Ed
 - Search and filters for operator, preset tag, device name, tagged device, status, and exact ULO cut.
 - License detail view with official backend metadata, reward history, and lease information.
 - Analytics tab with daily earnings, device leaders, tag coverage, uptime vs rewards, and distribution charts.
-- Withdrawal history and payout wallet views.
+- Manual-refresh payout wallet view.
 - Settings page to reset locally customized naming, tags, and operator data.
 
 ## Data Sources
@@ -27,7 +27,7 @@ This app is a static frontend. It does not ship with its own backend.
 
 It talks directly to `https://api.unityedge.io` from the browser and uses:
 
-- Reward endpoints for balances, allocations, summaries, and withdrawals.
+- Reward endpoints for balances, allocations, and summaries.
 - Official license metadata from `functions/v1/licenses_get_licenses`.
 
 The displayed license model is a merged view of:
@@ -86,22 +86,13 @@ npm run preview
 npm run lint
 ```
 
-## Deployment
+## Local-Only Use
 
-Vercel is the best fit for the current app structure because:
+This repo is currently set up for local use on your PC.
 
-- the app uses `BrowserRouter`
-- the repo already includes `vercel.json` with an SPA rewrite
-- the build output is static and deploys cleanly from `dist`
-
-### Vercel Settings
-
-- Framework preset: Vite
-- Build command: `npm run build`
-- Output directory: `dist`
-- Environment variable: `VITE_SUPABASE_ANON_KEY`
-
-GitHub Pages is possible, but it is not the cleanest option for this project because client-side routing needs extra handling.
+- Use `npm run dev` while working on the app.
+- Use `npm run build` and `npm run preview` if you want to test the production build locally.
+- Because the app uses `BrowserRouter`, any future static hosting setup would need an SPA fallback or rewrite rule.
 
 ## Local Persistence
 

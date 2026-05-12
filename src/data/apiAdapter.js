@@ -3,16 +3,12 @@
 // Auth: Supabase JWT via email login
 // Anon key required as `apikey` header on all requests
 
-import { readCustomDashboardData, writeCustomDashboardData } from './customDashboardDataStorage';
-
 const BASE_URL = 'https://api.unityedge.io';
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const TOKEN_STORAGE_KEY = 'unity_edge_token';
 const REFRESH_TOKEN_STORAGE_KEY = 'unity_edge_refresh_token';
 const USER_STORAGE_KEY = 'unity_edge_user';
 const CUSTOM_DASHBOARD_DATA_METADATA_KEY = 'unity_dashboard_custom_data';
-const CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS = 150;
-const pendingCustomDashboardSyncs = new Map();
 let refreshSessionPromise = null;
 
 function readStoredValue(storageKey) {
@@ -121,7 +117,7 @@ function clearStoredUser() {
 
 function getAnonKey() {
   if (!ANON_KEY) {
-    throw new Error('Missing VITE_SUPABASE_ANON_KEY. Add it in Vercel Project Settings -> Environment Variables, then redeploy.');
+    throw new Error('Missing VITE_SUPABASE_ANON_KEY. Add it to your local .env file before running the app.');
   }
 
   return ANON_KEY;
@@ -251,6 +247,37 @@ export async function getUser() {
   return user;
 }
 
+export async function clearLegacyCustomDashboardMetadata() {
+  if (!isAuthenticated()) {
+    throw new Error('Session expired. Please log in again.');
+  }
+
+  const currentUser = readStoredUser() || await getUser();
+  const currentMetadata = currentUser?.user_metadata && typeof currentUser.user_metadata === 'object' && !Array.isArray(currentUser.user_metadata)
+    ? currentUser.user_metadata
+    : {};
+  const hasLegacyMetadata = Object.prototype.hasOwnProperty.call(currentMetadata, CUSTOM_DASHBOARD_DATA_METADATA_KEY)
+    && currentMetadata[CUSTOM_DASHBOARD_DATA_METADATA_KEY] !== null;
+
+  if (!hasLegacyMetadata) {
+    return { changed: false, user: currentUser };
+  }
+
+  const nextUser = await request('/auth/v1/user', {
+    method: 'PUT',
+    body: {
+      data: {
+        ...currentMetadata,
+        [CUSTOM_DASHBOARD_DATA_METADATA_KEY]: null,
+      },
+    },
+  });
+
+  writeStoredUser(nextUser);
+
+  return { changed: true, user: nextUser };
+}
+
 async function refreshSessionInternal() {
   if (refreshSessionPromise) {
     return refreshSessionPromise;
@@ -351,111 +378,6 @@ async function fetchWithAuth(url, { method = 'GET', body, headers: extraHeaders 
   return res;
 }
 
-export function getCustomDashboardDataFromUser(user) {
-  const rawCustomData = user?.user_metadata?.[CUSTOM_DASHBOARD_DATA_METADATA_KEY];
-
-  if (!rawCustomData || typeof rawCustomData !== 'object' || Array.isArray(rawCustomData)) {
-    return null;
-  }
-
-  return rawCustomData;
-}
-
-function getCustomDashboardDataCounts(customData) {
-  return {
-    labelCount: Object.keys(customData?.labels || {}).length,
-    presetTagCount: Object.keys(customData?.presetTags || {}).length,
-    operatorCount: Object.keys(customData?.operators || {}).length,
-  };
-}
-
-export function hydrateLocalCustomDashboardDataFromUser(user) {
-  if (!user?.id) {
-    return null;
-  }
-
-  const remoteCustomData = getCustomDashboardDataFromUser(user);
-
-  if (!remoteCustomData) {
-    return null;
-  }
-
-  const normalizedCustomData = writeCustomDashboardData(user.id, remoteCustomData);
-  const counts = getCustomDashboardDataCounts(normalizedCustomData);
-
-  if (counts.labelCount + counts.presetTagCount + counts.operatorCount === 0) {
-    return null;
-  }
-
-  return {
-    source: 'account',
-    userId: user.id,
-    syncedAt: new Date().toISOString(),
-    counts,
-  };
-}
-
-async function syncLocalCustomDashboardDataToProfile(userId) {
-  if (!userId || !isAuthenticated()) {
-    return false;
-  }
-
-  try {
-    const currentUser = readStoredUser();
-    const baseUser = currentUser?.id === userId ? currentUser : await getUser();
-    const currentMetadata = baseUser?.user_metadata && typeof baseUser.user_metadata === 'object' && !Array.isArray(baseUser.user_metadata)
-      ? baseUser.user_metadata
-      : {};
-    const nextUser = await request('/auth/v1/user', {
-      method: 'PUT',
-      body: {
-        data: {
-          ...currentMetadata,
-          [CUSTOM_DASHBOARD_DATA_METADATA_KEY]: readCustomDashboardData(userId),
-        },
-      },
-    });
-
-    writeStoredUser(nextUser);
-    return true;
-  } catch (error) {
-    console.warn('Failed to sync custom dashboard data for the current Unity account.', error);
-    return false;
-  }
-}
-
-export function pushLocalCustomDashboardDataToProfile(userId) {
-  if (!userId || !isAuthenticated()) {
-    return Promise.resolve(false);
-  }
-
-  return new Promise((resolve) => {
-    const pendingSync = pendingCustomDashboardSyncs.get(userId);
-
-    if (pendingSync) {
-      clearTimeout(pendingSync.timerId);
-      pendingSync.resolvers.push(resolve);
-      pendingSync.timerId = setTimeout(async () => {
-        pendingCustomDashboardSyncs.delete(userId);
-        const result = await syncLocalCustomDashboardDataToProfile(userId);
-        pendingSync.resolvers.forEach((callback) => callback(result));
-      }, CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS);
-      return;
-    }
-
-    const nextPendingSync = {
-      resolvers: [resolve],
-      timerId: setTimeout(async () => {
-        pendingCustomDashboardSyncs.delete(userId);
-        const result = await syncLocalCustomDashboardDataToProfile(userId);
-        nextPendingSync.resolvers.forEach((callback) => callback(result));
-      }, CUSTOM_DASHBOARD_SYNC_DEBOUNCE_MS),
-    };
-
-    pendingCustomDashboardSyncs.set(userId, nextPendingSync);
-  });
-}
-
 // --- Rewards endpoints ---
 
 export async function getRewardsBalance() {
@@ -509,45 +431,4 @@ export async function getLicenses({ role = 'ulo', pageSize = 100 } = {}) {
   }
 
   return licenses;
-}
-
-// --- Withdrawal endpoints ---
-
-export async function getWithdrawals() {
-  return request('/rest/v1/rpc/rewards_get_withdrawals', { method: 'POST' });
-}
-
-export async function requestWithdrawalQuote({ amountMicros, walletAddress, chain, asset }) {
-  const res = await fetchWithAuth(`${BASE_URL}/functions/v1/rewards_request_withdrawal_quote`, {
-    method: 'POST',
-    body: { amountMicros, walletAddress, chain, asset, timestamp: Date.now() },
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || err.message || `Quote request failed (${res.status})`);
-  }
-
-  return res.json();
-}
-
-export async function submitWithdrawal({ quote, walletAddress, chain }) {
-  const res = await fetchWithAuth(`${BASE_URL}/functions/v1/rewards_request_withdrawal`, {
-    method: 'POST',
-    body: {
-      type: 'crypto',
-      chain,
-      asset: quote.asset,
-      assetAmount: quote.assetAmount,
-      quote,
-      walletAddress,
-    },
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || err.message || `Withdrawal failed (${res.status})`);
-  }
-
-  return res.json();
 }

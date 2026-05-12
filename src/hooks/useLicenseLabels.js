@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import { pushLocalCustomDashboardDataToProfile } from '../data/apiAdapter';
 import { clearLabels, normalizeLabels, readLabels, writeLabels } from '../data/customDashboardDataStorage';
 
 export function useLicenseLabels(userId) {
@@ -33,7 +32,6 @@ export function useLicenseLabels(userId) {
         delete next[licenseId];
       }
       writeLabels(userId, next);
-      void pushLocalCustomDashboardDataToProfile(userId);
       return next;
     });
     return true;
@@ -43,7 +41,6 @@ export function useLicenseLabels(userId) {
     const normalized = normalizeLabels(nextLabels);
     writeLabels(userId, normalized);
     setLabels(normalized);
-    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   const getLabel = useCallback((licenseId) => {
@@ -53,7 +50,6 @@ export function useLicenseLabels(userId) {
   const resetLabels = useCallback(() => {
     clearLabels(userId);
     setLabels({});
-    void pushLocalCustomDashboardDataToProfile(userId);
   }, [userId]);
 
   return { labels, getLabel, setLabel, replaceLabels, resetLabels };

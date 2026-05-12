@@ -1,21 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Download, LogOut, RefreshCw, RotateCcw, Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { clearLegacyCustomDashboardMetadata } from '../data/apiAdapter';
+import { useLicenseDeviceHistory } from '../hooks/useLicenseDeviceHistory';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
 
 export default function SettingsPage({ api }) {
-  const { user, refetch, logout, isLoading, historyInfo, resetRewardHistoryCache, customDataSyncInfo } = api;
+  const { user, manualRefresh, logout, isLoading, historyInfo, resetRewardHistoryCache } = api;
   const { labels, replaceLabels, resetLabels } = useLicenseLabels(user?.id);
-  const { presetTags, replacePresetTags, resetPresetTags } = useLicensePresetTags(user?.id);
+  const { presetTags, cloneTagOrder, replacePresetTags, resetPresetTags } = useLicensePresetTags(user?.id);
   const { operators, replaceOperators, resetOperators } = useOperatorTags(user?.id);
+  const { deviceHistory, replaceDeviceHistory, resetDeviceHistory } = useLicenseDeviceHistory(user?.id);
   const importInputRef = useRef(null);
   const [transferNotice, setTransferNotice] = useState(null);
+  const [legacyMetadataAction, setLegacyMetadataAction] = useState(false);
   const labelCount = Object.keys(labels).length;
   const presetTagCount = Object.keys(presetTags).length;
   const operatorCount = Object.keys(operators).length;
-  const hasCustomData = labelCount > 0 || presetTagCount > 0 || operatorCount > 0;
+  const deviceHistoryCount = Object.keys(deviceHistory).length;
+  const hasCustomData = labelCount > 0 || presetTagCount > 0 || operatorCount > 0 || deviceHistoryCount > 0;
   const archivedRewardCount = historyInfo?.allocationCount || 0;
   const hasArchivedRewardHistory = archivedRewardCount > 0;
 
@@ -27,23 +32,20 @@ export default function SettingsPage({ api }) {
     pending: 'Backfill pending',
   }[historyInfo?.backfillStatus || 'pending'];
 
-  useEffect(() => {
-    setTransferNotice(customDataSyncInfo || null);
-  }, [customDataSyncInfo, user?.id]);
-
   const transferNoticeText = (() => {
     if (!transferNotice?.counts) {
       return null;
     }
 
-    const { labelCount: importedLabels, presetTagCount: importedPresetTags, operatorCount: importedOperators } = transferNotice.counts;
-
-    if (transferNotice.source === 'account') {
-      return `${importedLabels} custom name${importedLabels !== 1 ? 's' : ''}, ${importedPresetTags} preset tag${importedPresetTags !== 1 ? 's' : ''}, and ${importedOperators} operator assignment${importedOperators !== 1 ? 's' : ''} loaded from your synced Unity account data on this device.`;
-    }
+    const {
+      labelCount: importedLabels,
+      presetTagCount: importedPresetTags,
+      operatorCount: importedOperators,
+      deviceHistoryCount: importedDeviceHistory = 0,
+    } = transferNotice.counts;
 
     if (transferNotice.source === 'file') {
-      return `${importedLabels} custom name${importedLabels !== 1 ? 's' : ''}, ${importedPresetTags} preset tag${importedPresetTags !== 1 ? 's' : ''}, and ${importedOperators} operator assignment${importedOperators !== 1 ? 's' : ''} imported from a backup file for user ID ${transferNotice.userId || user?.id || '—'}.`;
+      return `${importedLabels} custom name${importedLabels !== 1 ? 's' : ''}, ${importedPresetTags} preset tag${importedPresetTags !== 1 ? 's' : ''}, ${importedOperators} operator assignment${importedOperators !== 1 ? 's' : ''}, and ${importedDeviceHistory} remembered device histor${importedDeviceHistory === 1 ? 'y' : 'ies'} imported from a backup file for user ID ${transferNotice.userId || user?.id || '—'}.`;
     }
 
     return null;
@@ -56,7 +58,7 @@ export default function SettingsPage({ api }) {
     }
 
     const confirmed = window.confirm(
-      'This will remove all saved license names and operator assignments from this browser. Continue?'
+      'This will remove all saved license names, preset tags, operator assignments, and remembered device links from this browser. Continue?'
     );
 
     if (!confirmed) {
@@ -66,6 +68,7 @@ export default function SettingsPage({ api }) {
     resetLabels();
     resetPresetTags();
     resetOperators();
+    resetDeviceHistory();
     setTransferNotice(null);
     toast.success('Custom dashboard data reset');
   };
@@ -91,7 +94,9 @@ export default function SettingsPage({ api }) {
       customData: {
         labels,
         presetTags,
+        cloneTagOrder,
         operators,
+        deviceHistory,
       },
     };
 
@@ -134,8 +139,10 @@ export default function SettingsPage({ api }) {
 
       const nextLabels = importedCustomData?.labels || {};
       const nextPresetTags = importedCustomData?.presetTags || {};
+      const nextCloneTagOrder = importedCustomData?.cloneTagOrder;
       const nextOperators = importedCustomData?.operators || {};
-      const hasValidContent = [nextLabels, nextPresetTags, nextOperators].some(
+      const nextDeviceHistory = importedCustomData?.deviceHistory || {};
+      const hasValidContent = [nextLabels, nextPresetTags, nextOperators, nextDeviceHistory].some(
         (value) => value && typeof value === 'object' && !Array.isArray(value)
       );
 
@@ -144,7 +151,7 @@ export default function SettingsPage({ api }) {
       }
 
       const shouldReplace = !hasCustomData || window.confirm(
-        'This will replace the saved custom names, preset tags, and operator assignments for the current account in this browser. Continue?'
+        'This will replace the saved custom names, preset tags, operator assignments, and remembered device links for the current account in this browser. Continue?'
       );
 
       if (!shouldReplace) {
@@ -152,8 +159,9 @@ export default function SettingsPage({ api }) {
       }
 
       replaceLabels(nextLabels);
-      replacePresetTags(nextPresetTags);
+      replacePresetTags(nextPresetTags, nextCloneTagOrder);
       replaceOperators(nextOperators);
+      replaceDeviceHistory(nextDeviceHistory);
       setTransferNotice({
         source: 'file',
         userId: user.id,
@@ -162,6 +170,7 @@ export default function SettingsPage({ api }) {
           labelCount: Object.keys(nextLabels).length,
           presetTagCount: Object.keys(nextPresetTags).length,
           operatorCount: Object.keys(nextOperators).length,
+          deviceHistoryCount: Object.keys(nextDeviceHistory).length,
         },
       });
       toast.success('Custom dashboard data imported');
@@ -194,6 +203,39 @@ export default function SettingsPage({ api }) {
     }
 
     toast.success('Archived reward history reset');
+  };
+
+  const handleClearLegacyMetadata = async () => {
+    if (!user?.id) {
+      toast.error('User account is still loading');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'This will clear the old unity_dashboard_custom_data field from your Unity account profile. Your browser-only labels, tags, operators, and device history on this PC will stay untouched. Continue?'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setLegacyMetadataAction(true);
+
+    try {
+      const result = await clearLegacyCustomDashboardMetadata();
+
+      if (result.changed) {
+        await manualRefresh();
+        toast.success('Legacy Unity account metadata cleared');
+        return;
+      }
+
+      toast('No legacy Unity account metadata found');
+    } catch (error) {
+      toast.error(error.message || 'Unable to clear remote account metadata');
+    } finally {
+      setLegacyMetadataAction(false);
+    }
   };
 
   return (
@@ -233,10 +275,10 @@ export default function SettingsPage({ api }) {
           <div className="flex items-start justify-between">
             <div>
               <h3 className="text-sm font-medium text-white">Refresh Data</h3>
-              <p className="text-xs text-white/30 mt-1">Re-fetch all data from Unity Edge API</p>
+              <p className="text-xs text-white/30 mt-1">Re-fetch all data from Unity Edge API. Your custom names, tags, and operators stay browser-only and do not sync to your Unity account.</p>
             </div>
             <button
-              onClick={() => { refetch(); toast.success('Data refreshed'); }}
+              onClick={() => { manualRefresh(); toast.success('Refresh started'); }}
               disabled={isLoading}
               className="flex items-center gap-2 px-4 py-2 btn-gradient rounded-xl text-sm disabled:opacity-50"
             >
@@ -250,10 +292,10 @@ export default function SettingsPage({ api }) {
             <div>
               <h3 className="text-sm font-medium text-white">Reset Custom Dashboard Data</h3>
               <p className="text-xs text-white/30 mt-1">
-                Clear saved license names, preset tags, and operator assignments for the current Unity account in this browser.
+                Clear saved license names, preset tags, operator assignments, and remembered device links for the current Unity account in this browser.
               </p>
               <p className="text-xs text-white/40 mt-2">
-                {labelCount} custom name{labelCount !== 1 ? 's' : ''}, {presetTagCount} preset tag{presetTagCount !== 1 ? 's' : ''}, and {operatorCount} operator assignment{operatorCount !== 1 ? 's' : ''} saved.
+                {labelCount} custom name{labelCount !== 1 ? 's' : ''}, {presetTagCount} preset tag{presetTagCount !== 1 ? 's' : ''}, {operatorCount} operator assignment{operatorCount !== 1 ? 's' : ''}, and {deviceHistoryCount} remembered device histor{deviceHistoryCount === 1 ? 'y' : 'ies'} saved.
               </p>
             </div>
             <button
@@ -269,15 +311,18 @@ export default function SettingsPage({ api }) {
         <div className="glass p-6" style={{ borderColor: 'rgba(16, 185, 129, 0.2)' }}>
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h3 className="text-sm font-medium text-white">Transfer Custom Dashboard Data</h3>
+              <h3 className="text-sm font-medium text-white">Backup Custom Dashboard Data</h3>
               <p className="text-xs text-white/30 mt-1">
-                Custom names, preset tags, and operator assignments now sync to this Unity account, so the same account should load them on your other devices after sign-in.
+                Custom names, preset tags, operator assignments, and remembered device links are saved only in this browser on this PC. Use export and import if you want to move them somewhere else manually.
               </p>
               {transferNoticeText && (
                 <p className="text-xs text-white/40 mt-2">
                   {transferNoticeText}
                 </p>
               )}
+              <p className="text-xs text-white/40 mt-2">
+                Exported backup files include remembered device links as well.
+              </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 shrink-0">
               <button
@@ -301,6 +346,27 @@ export default function SettingsPage({ api }) {
                 onChange={handleImportCustomData}
               />
             </div>
+          </div>
+        </div>
+
+        <div className="glass p-6" style={{ borderColor: 'rgba(244, 63, 94, 0.2)' }}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-medium text-white">Clear Legacy Account Metadata</h3>
+              <p className="text-xs text-white/30 mt-1">
+                Remove the old remote <span className="font-mono">unity_dashboard_custom_data</span> field from your Unity account profile. This does not touch the browser-only labels, tags, operators, or remembered device links saved on this PC.
+              </p>
+              <p className="text-xs text-white/40 mt-2">
+                Use this once if you want to wipe any leftover metadata from older dashboard versions that used account sync.
+              </p>
+            </div>
+            <button
+              onClick={() => void handleClearLegacyMetadata()}
+              disabled={legacyMetadataAction || isLoading}
+              className="flex items-center gap-2 px-4 py-2 border border-rose-400/30 bg-rose-400/10 text-rose-200 rounded-xl text-sm hover:bg-rose-400/20 disabled:opacity-50 disabled:hover:bg-rose-400/10"
+            >
+              <RotateCcw size={14} /> {legacyMetadataAction ? 'Clearing...' : 'Clear Remote Metadata'}
+            </button>
           </div>
         </div>
 

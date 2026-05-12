@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Wallet, Copy, Check, RefreshCw, CircleDot, AlertCircle } from 'lucide-react';
 import { fetchAllWalletBalances } from '../data/payoutWallets';
-import { PayoutWalletsSkeleton } from '../components/common/Skeleton';
 import toast from 'react-hot-toast';
 
 function formatBalance(value, symbol) {
@@ -127,27 +126,22 @@ function ErrorCard({ network, error, index = 0 }) {
 
 export default function PayoutWalletsPage() {
   const [wallets, setWallets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
-  const loadWallets = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
+  const loadWallets = useCallback(async () => {
+    setLoading(true);
+
     try {
       const data = await fetchAllWalletBalances();
       setWallets(data);
+      setHasLoaded(true);
     } catch (err) {
       toast.error('Failed to fetch wallet balances');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   }, []);
-
-  useEffect(() => {
-    loadWallets();
-  }, [loadWallets]);
-
-  if (loading) return <PayoutWalletsSkeleton />;
 
   const totalFunded = wallets.filter((w) => w?.funded).length;
   const totalUsd = wallets.reduce((s, w) => s + (w?.totalUsd || 0), 0);
@@ -163,45 +157,61 @@ export default function PayoutWalletsPage() {
             </span>
             <h1 className="mt-2 sm:mt-3 text-xl sm:text-2xl font-bold text-white">Live Payout Wallet Balances</h1>
             <p className="mt-1.5 sm:mt-2 max-w-2xl text-xs sm:text-sm text-white/40">
-              Before confirming a withdrawal in Unity App, check which payout wallets currently have funds on your selected network.
+              Wallet balances stay unchanged until you press Refresh, so this page never refetches on its own.
             </p>
           </div>
           <button
-            onClick={() => loadWallets(true)}
-            disabled={refreshing}
+            onClick={() => void loadWallets()}
+            disabled={loading}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl glass-subtle text-xs sm:text-sm text-white/50 hover:text-white/80 hover:bg-white/[0.06] transition-all self-start shrink-0 disabled:opacity-50"
           >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
 
         {/* Summary bar */}
-        {wallets.length > 0 && (
+        {hasLoaded ? (
           <div className="mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-white/[0.06] flex flex-col sm:flex-row sm:flex-wrap items-start sm:items-center gap-2 sm:gap-6">
-            <div className="flex items-center gap-2">
-              <CircleDot size={14} className="text-success" />
-              <span className="text-xs sm:text-sm text-white/50">
-                <span className="text-white/80 font-medium">{totalFunded}</span> / {wallets.length} networks funded
-              </span>
-            </div>
-            <div className="text-xs sm:text-sm text-white/50">
-              Total across all wallets: <span className="text-white/80 font-semibold">{formatUsd(totalUsd)}</span>
-            </div>
+            {wallets.length > 0 ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <CircleDot size={14} className="text-success" />
+                  <span className="text-xs sm:text-sm text-white/50">
+                    <span className="text-white/80 font-medium">{totalFunded}</span> / {wallets.length} networks funded
+                  </span>
+                </div>
+                <div className="text-xs sm:text-sm text-white/50">
+                  Total across all wallets: <span className="text-white/80 font-semibold">{formatUsd(totalUsd)}</span>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs sm:text-sm text-white/40">
+                No payout wallet data was returned on the last refresh.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="mt-4 sm:mt-5 pt-3 sm:pt-4 border-t border-white/[0.06]">
+            <p className="text-xs sm:text-sm text-white/40">
+              Press Refresh to load the latest payout wallet balances. Until then, this page makes no balance requests.
+            </p>
           </div>
         )}
       </div>
 
       {/* Wallet cards — responsive grid */}
-      <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
-        {wallets.map((wallet, i) =>
-          wallet?.network ? (
-            <WalletCard key={wallet.network} wallet={wallet} index={i} />
-          ) : (
-            <ErrorCard key={i} network={['Ethereum', 'BSC', 'Solana', 'XRP'][i]} error={wallet} index={i} />
-          )
-        )}
-      </div>
+      {hasLoaded ? (
+        <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2">
+          {wallets.map((wallet, i) =>
+            wallet?.network ? (
+              <WalletCard key={wallet.network} wallet={wallet} index={i} />
+            ) : (
+              <ErrorCard key={i} network={['Ethereum', 'BSC', 'Solana', 'XRP'][i]} error={wallet} index={i} />
+            )
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

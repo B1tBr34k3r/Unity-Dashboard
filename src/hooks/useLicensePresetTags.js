@@ -1,42 +1,87 @@
 import { useState, useCallback, useEffect } from 'react';
-import { pushLocalCustomDashboardDataToProfile } from '../data/apiAdapter';
 import {
+  clearCloneTagOrder,
   clearPresetTags,
+  normalizeCloneTagOrder,
   normalizePresetTag,
   normalizePresetTags,
+  readCloneTagOrder,
   readPresetTags,
+  writeCloneTagOrder,
   writePresetTags,
 } from '../data/customDashboardDataStorage';
 import { LICENSE_TAG_PRESETS } from '../utils/licenseDisplay';
 
+function getPresetTagState(userId) {
+  const presetTags = readPresetTags(userId);
+
+  return {
+    presetTags,
+    cloneTagOrder: readCloneTagOrder(userId, presetTags),
+  };
+}
+
+function getNextCloneTagOrder(currentCloneTagOrder, nextPresetTags, licenseId, previousTag, nextTag) {
+  const normalizedOrder = normalizeCloneTagOrder(currentCloneTagOrder, nextPresetTags);
+  const wasClone = previousTag?.toLowerCase() === 'clone';
+  const isClone = nextTag?.toLowerCase() === 'clone';
+
+  if (wasClone && isClone) {
+    return normalizedOrder;
+  }
+
+  const withoutLicense = normalizedOrder.filter((currentId) => currentId !== licenseId);
+  return isClone ? [...withoutLicense, licenseId] : withoutLicense;
+}
+
 export function useLicensePresetTags(userId) {
-  const [presetTags, setPresetTags] = useState(() => readPresetTags(userId));
+  const [{ presetTags, cloneTagOrder }, setPresetTagState] = useState(() => getPresetTagState(userId));
 
   useEffect(() => {
-    setPresetTags(readPresetTags(userId));
+    setPresetTagState(getPresetTagState(userId));
   }, [userId]);
 
   const setPresetTag = useCallback((licenseId, tag) => {
     const normalizedTag = normalizePresetTag(tag);
 
-    setPresetTags((prev) => {
-      const next = { ...prev };
+    setPresetTagState((prevState) => {
+      const previousTag = prevState.presetTags[licenseId] || '';
+      const nextPresetTags = { ...prevState.presetTags };
+
       if (normalizedTag) {
-        next[licenseId] = normalizedTag;
+        nextPresetTags[licenseId] = normalizedTag;
       } else {
-        delete next[licenseId];
+        delete nextPresetTags[licenseId];
       }
-      writePresetTags(userId, next);
-      void pushLocalCustomDashboardDataToProfile(userId);
-      return next;
+
+      const nextCloneTagOrder = getNextCloneTagOrder(
+        prevState.cloneTagOrder,
+        nextPresetTags,
+        licenseId,
+        previousTag,
+        normalizedTag
+      );
+
+      writePresetTags(userId, nextPresetTags);
+      writeCloneTagOrder(userId, nextCloneTagOrder, nextPresetTags);
+
+      return {
+        presetTags: nextPresetTags,
+        cloneTagOrder: nextCloneTagOrder,
+      };
     });
   }, [userId]);
 
-  const replacePresetTags = useCallback((nextPresetTags) => {
-    const normalized = normalizePresetTags(nextPresetTags);
-    writePresetTags(userId, normalized);
-    setPresetTags(normalized);
-    void pushLocalCustomDashboardDataToProfile(userId);
+  const replacePresetTags = useCallback((nextPresetTags, nextCloneTagOrder) => {
+    const normalizedPresetTags = normalizePresetTags(nextPresetTags);
+    const normalizedCloneTagOrder = normalizeCloneTagOrder(nextCloneTagOrder, normalizedPresetTags);
+
+    writePresetTags(userId, normalizedPresetTags);
+    writeCloneTagOrder(userId, normalizedCloneTagOrder, normalizedPresetTags);
+    setPresetTagState({
+      presetTags: normalizedPresetTags,
+      cloneTagOrder: normalizedCloneTagOrder,
+    });
   }, [userId]);
 
   const getPresetTag = useCallback(
@@ -46,12 +91,13 @@ export function useLicensePresetTags(userId) {
 
   const resetPresetTags = useCallback(() => {
     clearPresetTags(userId);
-    setPresetTags({});
-    void pushLocalCustomDashboardDataToProfile(userId);
+    clearCloneTagOrder(userId);
+    setPresetTagState({ presetTags: {}, cloneTagOrder: [] });
   }, [userId]);
 
   return {
     presetTags,
+    cloneTagOrder,
     getPresetTag,
     setPresetTag,
     replacePresetTags,

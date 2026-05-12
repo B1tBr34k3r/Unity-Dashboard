@@ -3,17 +3,19 @@ import { Toaster } from 'react-hot-toast';
 import { lazy, Suspense, useCallback } from 'react';
 import AppShell from './components/layout/AppShell';
 import ErrorBoundary from './components/common/ErrorBoundary';
-import { DashboardSkeleton, LicenseListSkeleton, LicenseDetailSkeleton, WithdrawalSkeleton } from './components/common/Skeleton';
+import { DashboardSkeleton, LicenseListSkeleton, LicenseDetailSkeleton } from './components/common/Skeleton';
 import { useApi } from './hooks/useApi';
 import { useNavigate } from 'react-router-dom';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const DailyChangesPage = lazy(() => import('./pages/DailyChangesPage'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const LicenseHistoryPage = lazy(() => import('./pages/LicenseHistoryPage'));
+const LicenseHistoryDetailPage = lazy(() => import('./pages/LicenseHistoryDetailPage'));
 const LicenseListPage = lazy(() => import('./pages/LicenseListPage'));
 const LicenseDetailPage = lazy(() => import('./pages/LicenseDetailPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const PayoutWalletsPage = lazy(() => import('./pages/PayoutWalletsPage'));
-const WithdrawalPage = lazy(() => import('./pages/WithdrawalPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 
 function LoginWrapper({ onLogin }) {
@@ -48,10 +50,12 @@ export default function App() {
             <Suspense fallback={<DashboardSkeleton />}>
               <Routes>
                 <Route path="/" element={<DashboardPage api={api} />} />
+                <Route path="/daily-changes" element={<DailyChangesPage api={api} />} />
                 <Route path="/analytics" element={<AnalyticsPage api={api} />} />
+                <Route path="/license-history" element={<Suspense fallback={<LicenseListSkeleton />}><LicenseHistoryPage api={api} /></Suspense>} />
+                <Route path="/license-history/:id" element={<Suspense fallback={<LicenseDetailSkeleton />}><LicenseHistoryDetailPage api={api} /></Suspense>} />
                 <Route path="/licenses" element={<Suspense fallback={<LicenseListSkeleton />}><LicenseListPage api={api} /></Suspense>} />
                 <Route path="/licenses/:id" element={<Suspense fallback={<LicenseDetailSkeleton />}><LicenseDetailPage api={api} /></Suspense>} />
-                <Route path="/withdraw" element={<Suspense fallback={<WithdrawalSkeleton />}><WithdrawalPage api={api} /></Suspense>} />
                 <Route path="/payouts" element={<PayoutWalletsPage />} />
                 <Route path="/settings" element={<SettingsPage api={api} />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

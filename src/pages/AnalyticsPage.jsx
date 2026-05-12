@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
+  Brush,
   BarChart,
   Bar,
   Line,
@@ -52,6 +53,7 @@ const DATE_RANGE_LABELS = {
   '90d': 'Last 90 Days',
   custom: 'Custom Range',
 };
+const COMBINED_EARNINGS_DEFAULT_WINDOW = 45;
 
 function tooltipContainer(children, label) {
   return (
@@ -254,9 +256,9 @@ function getStatusBucket(license) {
 }
 
 export default function AnalyticsPage({ api }) {
-  const { user, balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, refetch } = api;
+  const { user, balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, manualRefresh } = api;
   const { getLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, presetTags } = useLicensePresetTags(user?.id);
+  const { getPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator } = useOperatorTags(user?.id);
   const dateRange = useDateRangeFilter(allocations || [], (item) => item.completedAt, 'page-state:analytics');
   const filteredAllocations = dateRange.filtered || [];
@@ -324,8 +326,8 @@ export default function AnalyticsPage({ api }) {
   );
 
   const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId])),
-    [presetTags, licenseInfoById]
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
+    [presetTags, licenseInfoById, cloneTagOrder]
   );
 
   const allocationStatsById = useMemo(() => {
@@ -509,6 +511,14 @@ export default function AnalyticsPage({ api }) {
     };
   }, [dailyTrendData]);
 
+  const dailyTrendBrushStartIndex = useMemo(() => {
+    if (!dailyTrendData.length) {
+      return 0;
+    }
+
+    return Math.max(0, dailyTrendData.length - COMBINED_EARNINGS_DEFAULT_WINDOW);
+  }, [dailyTrendData]);
+
   const statusMixData = useMemo(() => {
     const total = licenseAnalytics.length || 1;
     const byStatus = ['Online', 'Offline', 'Below Min', 'Unbound'].map((name) => ({
@@ -680,7 +690,7 @@ export default function AnalyticsPage({ api }) {
         <div className="flex items-center gap-2 sm:gap-3">
           <DateRangeFilter {...dateRange} />
           <button
-            onClick={refetch}
+            onClick={manualRefresh}
             disabled={isLoading}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 glass text-xs sm:text-sm text-white/60 hover:text-white disabled:opacity-50"
           >
@@ -787,7 +797,7 @@ export default function AnalyticsPage({ api }) {
               )}
 
               <ResponsiveContainer width="100%" height={420}>
-                <ComposedChart data={dailyTrendData} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+                <ComposedChart data={dailyTrendData} margin={{ top: 8, right: 12, left: -16, bottom: 28 }}>
                   <defs>
                     <linearGradient id="combinedDailyBar" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#818cf8" stopOpacity={0.95} />
@@ -839,6 +849,16 @@ export default function AnalyticsPage({ api }) {
                     strokeWidth={2.4}
                     dot={false}
                     activeDot={{ r: 4, fill: '#22d3ee', stroke: 'rgba(10,10,26,0.9)', strokeWidth: 2 }}
+                  />
+                  <Brush
+                    dataKey="label"
+                    height={24}
+                    travellerWidth={10}
+                    stroke="rgba(129,140,248,0.65)"
+                    fill="rgba(129,140,248,0.08)"
+                    startIndex={dailyTrendBrushStartIndex}
+                    endIndex={dailyTrendData.length - 1}
+                    tickFormatter={() => ''}
                   />
                 </ComposedChart>
               </ResponsiveContainer>

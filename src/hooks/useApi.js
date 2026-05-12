@@ -6,11 +6,12 @@ import {
   getRewardsBalance,
   getRewardsAllocations,
   getRewardsAllocationsSummary,
-  hydrateLocalCustomDashboardDataFromUser,
   refreshSession,
   clearToken,
   clearRefreshToken,
 } from '../data/apiAdapter';
+import { readAccountOverviewCache, writeAccountOverviewCache } from '../data/accountOverviewCache';
+import { trackLicenseDeviceHistory } from '../data/customDashboardDataStorage';
 import {
   buildRewardHistoryMeta,
   clearRewardHistory,
@@ -21,6 +22,7 @@ import {
   shouldAttemptRewardBackfill,
   writeRewardHistory,
 } from '../data/rewardHistory';
+import { writeDailyLicenseSnapshot } from '../data/licenseSnapshotHistory';
 import { clearPersistentPageState } from './usePersistentPageState';
 
 export function useApi() {
@@ -29,7 +31,6 @@ export function useApi() {
   const [licenses, setLicenses] = useState([]);
   const [allocations, setAllocations] = useState([]);
   const [summary, setSummary] = useState([]);
-  const [customDataSyncInfo, setCustomDataSyncInfo] = useState(null);
   const [historyInfo, setHistoryInfo] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -190,7 +191,65 @@ export function useApi() {
     return true;
   }, [user]);
 
-  const fetchAll = useCallback(async () => {
+  const rememberLicenseDeviceHistory = useCallback((userData, nextLicenses) => {
+    if (!userData?.id || !Array.isArray(nextLicenses) || nextLicenses.length === 0) {
+      return;
+    }
+
+    trackLicenseDeviceHistory(userData.id, nextLicenses);
+  }, []);
+
+  const rememberDailyLicenseSnapshots = useCallback((userData, nextLicenses) => {
+    if (!userData?.id || !Array.isArray(nextLicenses) || nextLicenses.length === 0) {
+      return;
+    }
+
+    writeDailyLicenseSnapshot(userData.id, nextLicenses);
+  }, []);
+
+  const hydrateCachedOverview = useCallback((userData, cachedOverview) => {
+    if (!userData?.id || !cachedOverview) {
+      return false;
+    }
+
+    setBalance(cachedOverview.balance);
+    setLicenses(cachedOverview.licenses);
+    setSummary(cachedOverview.summary);
+
+    if (cachedOverview.recentAllocations.length > 0) {
+      applyAllocationHistory(userData, cachedOverview.recentAllocations, { persist: false });
+    } else {
+      applyArchivedHistoryOnly(userData);
+    }
+
+    return true;
+  }, [applyAllocationHistory, applyArchivedHistoryOnly]);
+
+  const persistOverviewCache = useCallback((userData, snapshot) => {
+    if (!userData?.id) {
+      return null;
+    }
+
+    return writeAccountOverviewCache(userData.id, snapshot);
+  }, []);
+
+  const fetchCoreDashboardData = useCallback(() => Promise.allSettled([
+    getRewardsBalance(),
+    getLicenses(),
+    getRewardsAllocations(),
+    getRewardsAllocationsSummary(30),
+  ]), []);
+
+  const resolveUser = useCallback(async () => {
+    try {
+      return await getUser();
+    } catch {
+      await refreshSession();
+      return getUser();
+    }
+  }, []);
+
+  const fetchAll = useCallback(async ({ manual = false } = {}) => {
     if (!isAuthenticated()) {
       setAuthed(false);
       return;
@@ -202,98 +261,81 @@ export function useApi() {
     setIsLoading(true);
     setError(null);
 
-    // Clear previous data before fetching new account's data
-    currentUserIdRef.current = null;
-    setUser(null);
-    setBalance(null);
-    setLicenses([]);
-    setAllocations([]);
-    setSummary([]);
-    setCustomDataSyncInfo(null);
-    setHistoryInfo(null);
-
     try {
-      const [userData, balanceData, licensesData, allocData, summaryData] = await Promise.allSettled([
-        getUser(),
-        getRewardsBalance(),
-        getLicenses(),
-        getRewardsAllocations(),
-        getRewardsAllocationsSummary(30),
-      ]);
+      const resolvedUser = await resolveUser();
 
-      const resolvedUser = userData.status === 'fulfilled' ? userData.value : null;
+      setUser(resolvedUser);
 
-      if (resolvedUser) {
-        setCustomDataSyncInfo(hydrateLocalCustomDashboardDataFromUser(resolvedUser));
-        setUser(resolvedUser);
+      const cachedOverview = readAccountOverviewCache(resolvedUser.id);
+
+      if (!manual && hydrateCachedOverview(resolvedUser, cachedOverview)) {
+        return;
       }
 
-      if (balanceData.status === 'fulfilled') setBalance(balanceData.value);
+      const [balanceData, licensesData, allocData, summaryData] = await fetchCoreDashboardData();
+      const nextBalance = balanceData.status === 'fulfilled'
+        ? balanceData.value
+        : cachedOverview?.balance ?? null;
+      const nextLicenses = licensesData.status === 'fulfilled' && Array.isArray(licensesData.value)
+        ? licensesData.value
+        : cachedOverview?.licenses ?? [];
+      const nextRecentAllocations = allocData.status === 'fulfilled' && Array.isArray(allocData.value)
+        ? allocData.value
+        : cachedOverview?.recentAllocations ?? [];
+      const nextSummary = summaryData.status === 'fulfilled'
+        ? (Array.isArray(summaryData.value) ? summaryData.value : [summaryData.value])
+        : cachedOverview?.summary ?? [];
+      const hasFreshCoreData = [balanceData, licensesData, allocData, summaryData].some((result) => result.status === 'fulfilled');
+
+      setBalance(nextBalance);
+      setLicenses(nextLicenses);
+      setSummary(nextSummary);
+
       if (licensesData.status === 'fulfilled') {
-        setLicenses(Array.isArray(licensesData.value) ? licensesData.value : []);
+        rememberDailyLicenseSnapshots(resolvedUser, nextLicenses);
+        rememberLicenseDeviceHistory(resolvedUser, nextLicenses);
       }
-      if (allocData.status === 'fulfilled') {
+
+      if (allocData.status === 'fulfilled' || nextRecentAllocations.length > 0) {
         const { mergedAllocations, historyMeta } = applyAllocationHistory(
           resolvedUser,
-          Array.isArray(allocData.value) ? allocData.value : []
+          nextRecentAllocations,
+          { persist: allocData.status === 'fulfilled' }
         );
 
-        if (resolvedUser?.id && shouldAttemptRewardBackfill(historyMeta)) {
+        if (manual && allocData.status === 'fulfilled' && shouldAttemptRewardBackfill(historyMeta)) {
           void backfillRewardHistory(resolvedUser, mergedAllocations, runId);
         }
-      } else if (resolvedUser?.id) {
-        applyArchivedHistoryOnly(resolvedUser);
       } else {
-        latestAllocationsRef.current = [];
-        setAllocations([]);
-        setHistoryInfo(null);
-      }
-      if (summaryData.status === 'fulfilled') {
-        setSummary(Array.isArray(summaryData.value) ? summaryData.value : [summaryData.value]);
+        applyArchivedHistoryOnly(resolvedUser);
       }
 
-      // Check if all failed — try refresh
-      const allFailed = [userData, balanceData, licensesData, allocData, summaryData].every(
-        (r) => r.status === 'rejected'
-      );
-      if (allFailed) {
-        try {
-          await refreshSession();
-          const [u2, b2, l2, a2, s2] = await Promise.all([
-            getUser(),
-            getRewardsBalance(),
-            getLicenses(),
-            getRewardsAllocations(),
-            getRewardsAllocationsSummary(30),
-          ]);
+      if (hasFreshCoreData || cachedOverview) {
+        persistOverviewCache(resolvedUser, {
+          balance: nextBalance,
+          licenses: nextLicenses,
+          summary: nextSummary,
+          recentAllocations: nextRecentAllocations,
+        });
+      }
 
-          setCustomDataSyncInfo(hydrateLocalCustomDashboardDataFromUser(u2));
-          setUser(u2);
-          setBalance(b2);
-          setLicenses(Array.isArray(l2) ? l2 : []);
-
-          const { mergedAllocations, historyMeta } = applyAllocationHistory(u2, Array.isArray(a2) ? a2 : []);
-
-          if (u2?.id && shouldAttemptRewardBackfill(historyMeta)) {
-            void backfillRewardHistory(u2, mergedAllocations, runId);
-          }
-
-          setSummary(Array.isArray(s2) ? s2 : [s2]);
-        } catch {
-          setError('Session expired. Please log in again.');
-          setAuthed(false);
-        }
+      if (!hasFreshCoreData && !cachedOverview) {
+        setError('Unable to load dashboard data right now.');
       }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Session expired. Please log in again.');
+      setAuthed(false);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [applyAllocationHistory, applyArchivedHistoryOnly, backfillRewardHistory, fetchCoreDashboardData, hydrateCachedOverview, persistOverviewCache, rememberDailyLicenseSnapshots, rememberLicenseDeviceHistory, resolveUser]);
 
   useEffect(() => {
-    if (authed) fetchAll();
+    if (authed) fetchAll({ manual: false });
   }, [authed, fetchAll]);
+
+  const refetch = useCallback(() => fetchAll({ manual: false }), [fetchAll]);
+  const manualRefresh = useCallback(() => fetchAll({ manual: true }), [fetchAll]);
 
   const logout = () => {
     clearToken();
@@ -306,7 +348,6 @@ export function useApi() {
     setLicenses([]);
     setAllocations([]);
     setSummary([]);
-    setCustomDataSyncInfo(null);
     setHistoryInfo(null);
     setError(null);
     setAuthed(false);
@@ -322,7 +363,6 @@ export function useApi() {
     setLicenses([]);
     setAllocations([]);
     setSummary([]);
-    setCustomDataSyncInfo(null);
     setHistoryInfo(null);
     setError(null);
     setAuthed(true);
@@ -334,12 +374,12 @@ export function useApi() {
     licenses,
     allocations,
     summary,
-    customDataSyncInfo,
     historyInfo,
     isLoading,
     error,
     isAuthenticated: authed,
-    refetch: fetchAll,
+    refetch,
+    manualRefresh,
     resetRewardHistoryCache,
     logout,
     onLogin,

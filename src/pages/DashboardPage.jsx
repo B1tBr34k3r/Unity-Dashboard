@@ -1,19 +1,130 @@
 import { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import StatCard from '../components/dashboard/StatCard';
 import MonthlyRewardsChart from '../components/dashboard/MonthlyRewardsChart';
 import OperatorBadge from '../components/licenses/OperatorBadge';
 import { useOperatorTags } from '../hooks/useOperatorTags';
-import { aggregateByRewardMonth, formatRewardDayLabel, formatRewardMonthLabel, getRewardMonthKey, microsToUsd } from '../utils/formatters';
-import { Wallet, TrendingUp, Calendar, Clock, RefreshCw, Users } from 'lucide-react';
+import { useLicenseLabels } from '../hooks/useLicenseLabels';
+import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
+import { aggregateByRewardMonth, formatRewardDayLabel, formatRewardMonthLabel, getRewardDayKey, getRewardMonthKey, microsToUsd } from '../utils/formatters';
+import { Wallet, TrendingUp, Calendar, Clock, RefreshCw, Users, ArrowUpRight } from 'lucide-react';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
+import { buildCloneIndexMap, getLicenseBackendName, getLicenseDisplayName } from '../utils/licenseDisplay';
+
+function hasBoundDevice(license) {
+  return Boolean(license?.deviceId || license?.deviceName);
+}
+
+function formatSignedUsd(micros) {
+  if (micros > 0) {
+    return `+$${microsToUsd(micros)}`;
+  }
+
+  if (micros < 0) {
+    return `-$${microsToUsd(Math.abs(micros))}`;
+  }
+
+  return '$0.00';
+}
+
+function buildDailyInsight(allocations, onlineLicenseIds, getDisplayName) {
+  const onlineAllocations = (allocations || []).filter((allocation) => onlineLicenseIds.has(String(allocation.licenseId)));
+
+  if (!onlineAllocations.length) {
+    return null;
+  }
+
+  const byDay = {};
+
+  onlineAllocations.forEach((allocation) => {
+    const dayKey = getRewardDayKey(allocation.completedAt);
+
+    if (!byDay[dayKey]) {
+      byDay[dayKey] = {
+        dayKey,
+        totalMicros: 0,
+        allocationCount: 0,
+        licenseAmounts: {},
+      };
+    }
+
+    byDay[dayKey].totalMicros += allocation.amountMicros;
+    byDay[dayKey].allocationCount += 1;
+    byDay[dayKey].licenseAmounts[allocation.licenseId] = (byDay[dayKey].licenseAmounts[allocation.licenseId] || 0) + allocation.amountMicros;
+  });
+
+  const dayKeys = Object.keys(byDay).sort((left, right) => left.localeCompare(right));
+  const latestDayKey = dayKeys[dayKeys.length - 1];
+  const previousDayKey = dayKeys[dayKeys.length - 2] || null;
+  const latestDay = byDay[latestDayKey];
+
+  if (!previousDayKey) {
+    return {
+      latestLabel: formatRewardDayLabel(latestDayKey, true),
+      previousLabel: null,
+      deltaMicros: 0,
+      totalMicros: latestDay.totalMicros,
+      allocationCount: latestDay.allocationCount,
+      rewardedLicenseCount: Object.keys(latestDay.licenseAmounts).length,
+      topDriver: null,
+    };
+  }
+
+  const previousDay = byDay[previousDayKey];
+  const licenseIds = new Set([...Object.keys(latestDay.licenseAmounts), ...Object.keys(previousDay.licenseAmounts)]);
+  const licenseDiffs = Array.from(licenseIds)
+    .map((licenseId) => ({
+      licenseId,
+      name: getDisplayName(licenseId),
+      diffMicros: (latestDay.licenseAmounts[licenseId] || 0) - (previousDay.licenseAmounts[licenseId] || 0),
+    }))
+    .filter((entry) => entry.diffMicros !== 0)
+    .sort((left, right) => Math.abs(right.diffMicros) - Math.abs(left.diffMicros));
+
+  return {
+    latestLabel: formatRewardDayLabel(latestDayKey, true),
+    previousLabel: formatRewardDayLabel(previousDayKey, true),
+    deltaMicros: latestDay.totalMicros - previousDay.totalMicros,
+    totalMicros: latestDay.totalMicros,
+    allocationCount: latestDay.allocationCount,
+    rewardedLicenseCount: Object.keys(latestDay.licenseAmounts).length,
+    topDriver: licenseDiffs[0] || null,
+  };
+}
 
 export default function DashboardPage({ api }) {
-  const { user, balance, allocations, summary, historyInfo, isLoading, error, refetch } = api;
+  const { user, balance, allocations, licenses, summary, historyInfo, isLoading, error, manualRefresh } = api;
   const summaryData = summary?.[0] || null;
   const { getOperator, allOperators } = useOperatorTags(user?.id);
+  const { getLabel } = useLicenseLabels(user?.id);
+  const { getPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
   const dateRange = useDateRangeFilter(allocations, (item) => item.completedAt, 'page-state:dashboard');
   const filteredAllocations = dateRange.filtered;
+  const licenseInfoById = useMemo(
+    () => Object.fromEntries((licenses || []).map((license) => [license.id, license])),
+    [licenses]
+  );
+  const cloneIndexById = useMemo(
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
+    [presetTags, licenseInfoById, cloneTagOrder]
+  );
+  const onlineLicenseIds = useMemo(
+    () => new Set((licenses || []).filter((license) => hasBoundDevice(license) && license.isOnline).map((license) => String(license.id))),
+    [licenses]
+  );
+
+  const getDisplayName = (licenseId) => getLicenseDisplayName({
+    customLabel: getLabel(licenseId),
+    backendName: getLicenseBackendName(licenseInfoById[licenseId]),
+    presetTag: getPresetTag(licenseId),
+    cloneIndex: cloneIndexById[licenseId] || null,
+  }) || `License ${licenseId}`;
+
+  const dailyInsight = useMemo(
+    () => buildDailyInsight(allocations, onlineLicenseIds, getDisplayName),
+    [allocations, onlineLicenseIds, getLabel, getPresetTag, cloneIndexById, licenseInfoById]
+  );
 
   const monthData = useMemo(() => {
     return aggregateByRewardMonth(filteredAllocations || []).map((entry) => ({
@@ -131,7 +242,7 @@ export default function DashboardPage({ api }) {
         <div className="flex items-center gap-2">
           <DateRangeFilter {...dateRange} />
           <button
-            onClick={refetch}
+            onClick={manualRefresh}
             disabled={isLoading}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 glass text-xs sm:text-sm text-white/60 hover:text-white disabled:opacity-50"
           >
@@ -178,6 +289,51 @@ export default function DashboardPage({ api }) {
           color="text-white/50"
         />
       </div>
+
+      {dailyInsight ? (
+        <Link to="/daily-changes" className="block group">
+          <section className="glass p-4 sm:p-6 transition-colors duration-200 hover:bg-white/[0.05]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider">Why Rewards Changed</p>
+                <h2 className="text-base sm:text-lg font-semibold text-white mt-2">Daily Changes Teaser</h2>
+                <p className="text-sm text-white/45 mt-2 max-w-2xl">
+                  {dailyInsight.previousLabel
+                    ? `${dailyInsight.latestLabel} moved ${formatSignedUsd(dailyInsight.deltaMicros)} vs ${dailyInsight.previousLabel}. ${dailyInsight.topDriver ? `Largest single mover: ${dailyInsight.topDriver.name} ${formatSignedUsd(dailyInsight.topDriver.diffMicros)}.` : ''}`
+                    : `Stored rewards are live for ${dailyInsight.latestLabel}. Open Daily Changes once a second reward day exists to see the exact day-over-day explanation.`}
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-white/60 group-hover:text-white">
+                Open Daily Changes
+                <ArrowUpRight size={13} />
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+              <div className="glass-subtle rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Day</p>
+                <p className="text-sm font-semibold text-white mt-1">{dailyInsight.latestLabel}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyInsight.rewardedLicenseCount} rewarded online licenses</p>
+              </div>
+              <div className="glass-subtle rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Total</p>
+                <p className="text-sm font-semibold text-white mt-1">${microsToUsd(dailyInsight.totalMicros)}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyInsight.allocationCount} allocations</p>
+              </div>
+              <div className="glass-subtle rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Net Delta</p>
+                <p className={`text-sm font-semibold mt-1 ${dailyInsight.deltaMicros >= 0 ? 'text-success' : 'text-warning'}`}>{formatSignedUsd(dailyInsight.deltaMicros)}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyInsight.previousLabel ? `vs ${dailyInsight.previousLabel}` : 'Need prior day'}</p>
+              </div>
+              <div className="glass-subtle rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Largest Mover</p>
+                <p className="text-sm font-semibold text-white mt-1 truncate">{dailyInsight.topDriver?.name || 'No standout yet'}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyInsight.topDriver ? formatSignedUsd(dailyInsight.topDriver.diffMicros) : 'Open for the full breakdown'}</p>
+              </div>
+            </div>
+          </section>
+        </Link>
+      ) : null}
 
       <div className="glass p-3.5 sm:p-6">
         <h2 className="text-[10px] sm:text-xs font-medium text-white/40 uppercase tracking-wider mb-3 sm:mb-5">Monthly Reward Momentum</h2>

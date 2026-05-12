@@ -16,7 +16,7 @@ function getCanonicalDeviceName(name) {
   return DEVICE_NAME_CANONICAL_MAP[normalizeDeviceAliasKey(trimmedName)] || trimmedName;
 }
 
-function normalizeCloneKey(baseName) {
+function normalizeCloneBucketKey(baseName) {
   return (baseName || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
@@ -28,19 +28,51 @@ export function getLicenseBackendName(license) {
   return getCanonicalDeviceName(getLicenseOriginalBackendName(license));
 }
 
-export function buildCloneIndexMap(presetTags, getBackendName) {
-  const countsByKey = new Map();
-
-  return Object.keys(presetTags || {}).reduce((cloneIndexesById, licenseId) => {
+export function buildCloneIndexMap(presetTags, getBackendName, cloneTagOrder = []) {
+  const cloneLicenseIds = Object.keys(presetTags || {}).filter((licenseId) => {
     const presetTag = presetTags[licenseId];
-    if (!presetTag || presetTag.toLowerCase() !== 'clone') {
-      return cloneIndexesById;
+    return presetTag && presetTag.toLowerCase() === 'clone';
+  });
+  const cloneLicenseIdSet = new Set(cloneLicenseIds);
+  const orderedCloneIds = [];
+  const seen = new Set();
+
+  cloneTagOrder.forEach((licenseId) => {
+    if (!cloneLicenseIdSet.has(licenseId) || seen.has(licenseId)) {
+      return;
     }
 
-    const baseKey = normalizeCloneKey(getBackendName(licenseId)) || `__clone__:${licenseId}`;
-    const nextIndex = (countsByKey.get(baseKey) || 0) + 1;
+    seen.add(licenseId);
+    orderedCloneIds.push(licenseId);
+  });
 
-    countsByKey.set(baseKey, nextIndex);
+  const fallbackCloneIds = cloneLicenseIds
+    .filter((licenseId) => !seen.has(licenseId))
+    .sort((leftId, rightId) => {
+      const leftBucketKey = normalizeCloneBucketKey(getBackendName(leftId)) || `__clone__:${leftId}`;
+      const rightBucketKey = normalizeCloneBucketKey(getBackendName(rightId)) || `__clone__:${rightId}`;
+      const bucketComparison = leftBucketKey.localeCompare(rightBucketKey, undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+
+      if (bucketComparison !== 0) {
+        return bucketComparison;
+      }
+
+      return leftId.localeCompare(rightId, undefined, {
+        sensitivity: 'base',
+        numeric: true,
+      });
+    });
+
+  const countsByBucketKey = new Map();
+
+  return [...orderedCloneIds, ...fallbackCloneIds].reduce((cloneIndexesById, licenseId) => {
+    const bucketKey = normalizeCloneBucketKey(getBackendName(licenseId)) || `__clone__:${licenseId}`;
+    const nextIndex = (countsByBucketKey.get(bucketKey) || 0) + 1;
+
+    countsByBucketKey.set(bucketKey, nextIndex);
     cloneIndexesById[licenseId] = nextIndex;
     return cloneIndexesById;
   }, {});

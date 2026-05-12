@@ -77,10 +77,10 @@ function isBelowMinUptime(license) {
 }
 
 export default function LicenseListPage({ api }) {
-  const { user, allocations, licenses: licenseMetadata, summary, isLoading, refetch } = api;
+  const { user, allocations, licenses: licenseMetadata, summary, isLoading, manualRefresh } = api;
   const summaryData = summary?.[0] || null;
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, setPresetTag, tagPresets, presetTags } = useLicensePresetTags(user?.id);
+  const { getPresetTag, setPresetTag, tagPresets, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
   const navigate = useNavigate();
   const [search, setSearch] = usePersistentPageState('page-state:licenses:search', '');
@@ -101,8 +101,8 @@ export default function LicenseListPage({ api }) {
     [licenseMetadata]
   );
   const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId])),
-    [presetTags, licenseInfoById]
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
+    [presetTags, licenseInfoById, cloneTagOrder]
   );
 
   const allocationStatsById = useMemo(() => {
@@ -472,7 +472,7 @@ export default function LicenseListPage({ api }) {
             </p>
           </div>
           <button
-            onClick={refetch}
+            onClick={manualRefresh}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 glass text-xs sm:text-sm text-white/60 hover:text-white"
           >
             <RefreshCw size={14} /> <span className="hidden sm:inline">Refresh</span>

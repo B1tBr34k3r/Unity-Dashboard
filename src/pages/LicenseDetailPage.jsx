@@ -35,7 +35,7 @@ export default function LicenseDetailPage({ api }) {
 
   const totalReward = logs.reduce((sum, a) => sum + a.amountMicros, 0);
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, setPresetTag, presetTags } = useLicensePresetTags(user?.id);
+  const { getPresetTag, setPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
 
   // Chart data
@@ -49,8 +49,8 @@ export default function LicenseDetailPage({ api }) {
     [licenseMetadata]
   );
   const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId])),
-    [presetTags, licenseInfoById]
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
+    [presetTags, licenseInfoById, cloneTagOrder]
   );
 
   const licenseDetails = useMemo(
