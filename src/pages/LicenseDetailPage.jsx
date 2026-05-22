@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Copy, Pencil, Check, X } from 'lucide-react';
+import TrendCandleBar from '../components/common/TrendCandleBar';
 import HoverRevealText from '../components/common/HoverRevealText';
 import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
@@ -9,9 +10,9 @@ import { useOperatorTags } from '../hooks/useOperatorTags';
 import LicenseTagPicker from '../components/licenses/LicenseTagPicker';
 import LicenseStatusBadge from '../components/licenses/LicenseStatusBadge';
 import OperatorPicker from '../components/licenses/OperatorPicker';
-import { aggregateByRewardMonth, formatDateShort, formatRewardDayLabel, microsDetailed, truncateHex } from '../utils/formatters';
+import { aggregateByRewardMonth, formatDateShort, formatRewardDayLabel, getRewardDayKey, getRewardMonthKey, microsDetailed, truncateHex } from '../utils/formatters';
 import { buildCloneIndexMap, formatLeaseTimeLeft, formatLicenseDistribution, formatTaggedLicenseName, getLicenseBackendName, getLicenseDisplayName, getLicenseOriginalBackendName } from '../utils/licenseDisplay';
-import { ResponsiveContainer, BarChart, Bar, Brush, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, ComposedChart, Area, Bar, Brush, Cell, Line, ReferenceLine, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import toast from 'react-hot-toast';
 import { LicenseDetailSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
@@ -19,6 +20,79 @@ import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRa
 const DAILY_REWARD_DEFAULT_WINDOW = 45;
 const DAILY_REWARD_MIN_WIDTH = 720;
 const DAILY_REWARD_BAR_WIDTH = 24;
+const TOOLTIP_BREAKDOWN_LIMIT = 6;
+
+function formatDailyRewardAmount(value) {
+  return `$${Number(value || 0).toFixed(4)} UP`;
+}
+
+function formatRewardBreakdownTime(value) {
+  if (!value) {
+    return 'Unknown time';
+  }
+
+  return new Date(value).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function DailyRewardTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const point = payload[0].payload;
+  const hasCombinedBreakdown = point.rewardCount > 1 && point.breakdown?.length;
+
+  return (
+    <div
+      style={{
+        background: 'rgba(10,10,26,0.92)',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.12)',
+        borderRadius: '12px',
+        color: '#fff',
+        padding: '10px 14px',
+        boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
+      }}
+    >
+      <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, marginBottom: 6 }}>{label}</p>
+      <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{formatDailyRewardAmount(point.reward)}</p>
+      <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11 }}>
+        {hasCombinedBreakdown
+          ? `${point.rewardCount} rewards combined into this day total`
+          : 'Single reward for this day'}
+      </p>
+      <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 4 }}>
+        7-day trend {formatDailyRewardAmount(point.rollingAverage)}
+      </p>
+      {hasCombinedBreakdown ? (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+            Breakdown
+          </p>
+          {point.breakdown.slice(0, TOOLTIP_BREAKDOWN_LIMIT).map((entry) => (
+            <div
+              key={`${entry.timestamp}-${entry.amount}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 4 }}
+            >
+              <span style={{ color: 'rgba(255,255,255,0.48)', fontSize: 10 }}>{entry.timeLabel}</span>
+              <span style={{ color: 'rgba(255,255,255,0.88)', fontSize: 10, fontFamily: 'monospace' }}>
+                {formatDailyRewardAmount(entry.amount)}
+              </span>
+            </div>
+          ))}
+          {point.breakdown.length > TOOLTIP_BREAKDOWN_LIMIT ? (
+            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10, marginTop: 6 }}>
+              +{point.breakdown.length - TOOLTIP_BREAKDOWN_LIMIT} more reward{point.breakdown.length - TOOLTIP_BREAKDOWN_LIMIT === 1 ? '' : 's'}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function LicenseDetailPage({ api }) {
   const { id } = useParams();
@@ -43,11 +117,87 @@ export default function LicenseDetailPage({ api }) {
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
   const { getPresetTag, setPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
+  const [selectedChartMonthKey, setSelectedChartMonthKey] = useState('all');
+  const [dailyRewardBrushRange, setDailyRewardBrushRange] = useState({ startIndex: 0, endIndex: 0 });
 
-  const chartData = useMemo(() => logs.map((a) => ({
-    date: formatRewardDayLabel(a.completedAt),
-    reward: Number((a.amountMicros / 1_000_000).toFixed(4)),
-  })), [logs]);
+  const chartData = useMemo(() => {
+    const dailyBuckets = logs.reduce((map, allocation) => {
+      const dayKey = getRewardDayKey(allocation.completedAt);
+      const current = map.get(dayKey) || {
+        dayKey,
+        monthKey: getRewardMonthKey(dayKey),
+        totalMicros: 0,
+        rewardCount: 0,
+        breakdown: [],
+      };
+
+      current.totalMicros += allocation.amountMicros;
+      current.rewardCount += 1;
+      current.breakdown.push({
+        timestamp: allocation.completedAt,
+        timeLabel: formatRewardBreakdownTime(allocation.completedAt),
+        amount: Number((allocation.amountMicros / 1_000_000).toFixed(4)),
+      });
+      map.set(dayKey, current);
+      return map;
+    }, new Map());
+
+    const orderedDays = Array.from(dailyBuckets.values()).sort((left, right) => left.dayKey.localeCompare(right.dayKey));
+    const peakTotalMicros = orderedDays.reduce((maxValue, entry) => Math.max(maxValue, entry.totalMicros), 0);
+
+    return orderedDays.map((entry, index) => {
+      const windowEntries = orderedDays.slice(Math.max(0, index - 6), index + 1);
+      const rollingAverageMicros = windowEntries.reduce((sum, windowEntry) => sum + windowEntry.totalMicros, 0) / windowEntries.length;
+
+      return {
+        dayKey: entry.dayKey,
+        date: formatRewardDayLabel(entry.dayKey),
+        reward: Number((entry.totalMicros / 1_000_000).toFixed(4)),
+        rewardCount: entry.rewardCount,
+        monthKey: entry.monthKey,
+        breakdown: [...entry.breakdown].sort((left, right) => new Date(left.timestamp) - new Date(right.timestamp)),
+        rollingAverage: Number((rollingAverageMicros / 1_000_000).toFixed(4)),
+        isPeak: peakTotalMicros > 0 && entry.totalMicros === peakTotalMicros,
+        isLatest: index === orderedDays.length - 1,
+      };
+    });
+  }, [logs]);
+
+  const visibleDailyRewardData = useMemo(() => {
+    if (!chartData.length) {
+      return [];
+    }
+
+    const safeStart = Math.max(0, Math.min(dailyRewardBrushRange.startIndex, chartData.length - 1));
+    const safeEnd = Math.max(safeStart, Math.min(dailyRewardBrushRange.endIndex, chartData.length - 1));
+
+    return chartData.slice(safeStart, safeEnd + 1);
+  }, [chartData, dailyRewardBrushRange]);
+
+  const visibleDailyRewardRangeLabel = useMemo(() => {
+    if (!visibleDailyRewardData.length) {
+      return null;
+    }
+
+    return `${visibleDailyRewardData[0].date} - ${visibleDailyRewardData[visibleDailyRewardData.length - 1].date}`;
+  }, [visibleDailyRewardData]);
+
+  const dailyRewardInsights = useMemo(() => {
+    if (!visibleDailyRewardData.length) {
+      return null;
+    }
+
+    const totalVisibleRewards = visibleDailyRewardData.reduce((sum, entry) => sum + entry.reward, 0);
+    const bestDay = [...visibleDailyRewardData].sort((left, right) => right.reward - left.reward)[0];
+    const latestDay = visibleDailyRewardData[visibleDailyRewardData.length - 1];
+
+    return {
+      bestDay,
+      latestDay,
+      averagePerDay: Number((totalVisibleRewards / visibleDailyRewardData.length).toFixed(4)),
+      dayCount: visibleDailyRewardData.length,
+    };
+  }, [visibleDailyRewardData]);
 
   const dailyRewardBrushStartIndex = useMemo(() => {
     if (!chartData.length) {
@@ -58,9 +208,68 @@ export default function LicenseDetailPage({ api }) {
   }, [chartData]);
 
   const dailyRewardChartMinWidth = useMemo(
-    () => Math.max(DAILY_REWARD_MIN_WIDTH, chartData.length * DAILY_REWARD_BAR_WIDTH),
-    [chartData]
+    () => Math.max(DAILY_REWARD_MIN_WIDTH, visibleDailyRewardData.length * DAILY_REWARD_BAR_WIDTH),
+    [visibleDailyRewardData]
   );
+
+  const monthChartWindows = useMemo(() => {
+    const rangesByMonthKey = new Map();
+
+    chartData.forEach((entry, index) => {
+      const current = rangesByMonthKey.get(entry.monthKey);
+
+      if (current) {
+        current.endIndex = index;
+        return;
+      }
+
+      rangesByMonthKey.set(entry.monthKey, {
+        startIndex: index,
+        endIndex: index,
+      });
+    });
+
+    return monthData.map((month) => ({
+      ...month,
+      startIndex: rangesByMonthKey.get(month.key)?.startIndex ?? 0,
+      endIndex: rangesByMonthKey.get(month.key)?.endIndex ?? 0,
+    }));
+  }, [chartData, monthData]);
+
+  const selectedChartMonth = useMemo(
+    () => monthChartWindows.find((month) => month.key === selectedChartMonthKey) || null,
+    [monthChartWindows, selectedChartMonthKey]
+  );
+
+  useEffect(() => {
+    if (selectedChartMonthKey === 'all') {
+      return;
+    }
+
+    if (!selectedChartMonth) {
+      setSelectedChartMonthKey('all');
+    }
+  }, [selectedChartMonth, selectedChartMonthKey]);
+
+  useEffect(() => {
+    if (!chartData.length) {
+      setDailyRewardBrushRange({ startIndex: 0, endIndex: 0 });
+      return;
+    }
+
+    if (selectedChartMonth) {
+      setDailyRewardBrushRange({
+        startIndex: selectedChartMonth.startIndex,
+        endIndex: selectedChartMonth.endIndex,
+      });
+      return;
+    }
+
+    setDailyRewardBrushRange({
+      startIndex: dailyRewardBrushStartIndex,
+      endIndex: chartData.length - 1,
+    });
+  }, [chartData.length, dailyRewardBrushStartIndex, selectedChartMonth]);
 
   const licenseInfoById = useMemo(
     () => Object.fromEntries((licenseMetadata || []).map((license) => [license.id, license])),
@@ -125,6 +334,47 @@ export default function LicenseDetailPage({ api }) {
   const saveLabel = () => {
     const success = setLabel(decodedId, editValue);
     if (success) setEditing(false);
+  };
+
+  const handleSelectChartMonth = (monthKey) => {
+    if (!chartData.length || monthKey === 'all') {
+      setSelectedChartMonthKey('all');
+      setDailyRewardBrushRange({
+        startIndex: dailyRewardBrushStartIndex,
+        endIndex: Math.max(0, chartData.length - 1),
+      });
+      return;
+    }
+
+    const targetMonth = monthChartWindows.find((month) => month.key === monthKey);
+
+    if (!targetMonth) {
+      return;
+    }
+
+    setSelectedChartMonthKey(targetMonth.key);
+    setDailyRewardBrushRange({
+      startIndex: targetMonth.startIndex,
+      endIndex: targetMonth.endIndex,
+    });
+  };
+
+  const handleDailyRewardBrushChange = ({ startIndex, endIndex }) => {
+    if (!chartData.length) {
+      return;
+    }
+
+    const nextStartIndex = typeof startIndex === 'number' ? startIndex : 0;
+    const nextEndIndex = typeof endIndex === 'number' ? endIndex : chartData.length - 1;
+
+    if (selectedChartMonth && (nextStartIndex !== selectedChartMonth.startIndex || nextEndIndex !== selectedChartMonth.endIndex)) {
+      setSelectedChartMonthKey('all');
+    }
+
+    setDailyRewardBrushRange({
+      startIndex: nextStartIndex,
+      endIndex: nextEndIndex,
+    });
   };
 
   if (isLoading) return <LicenseDetailSkeleton />;
@@ -306,14 +556,35 @@ export default function LicenseDetailPage({ api }) {
 
       {monthData.length > 0 && (
         <div className="glass p-4 sm:p-6 mb-4">
-          <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-4">Monthly Rewards</h2>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider">Monthly Rewards</h2>
+              <p className="text-[11px] text-white/30 mt-1">Select a month to jump the daily chart to that section.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleSelectChartMonth('all')}
+              className={`inline-flex items-center justify-center rounded-xl border px-3 py-2 text-xs transition-colors ${selectedChartMonthKey === 'all'
+                ? 'border-accent-light/40 bg-accent-light/15 text-accent-light'
+                : 'border-white/[0.08] bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white/75'}`}
+            >
+              All visible months
+            </button>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {monthData.map((month) => (
-              <div key={month.key} className="glass-subtle p-3 rounded-xl">
+            {monthChartWindows.map((month) => (
+              <button
+                key={month.key}
+                type="button"
+                onClick={() => handleSelectChartMonth(month.key)}
+                className={`glass-subtle p-3 rounded-xl text-left transition-colors ${selectedChartMonthKey === month.key
+                  ? 'border border-accent-light/35 bg-accent-light/12'
+                  : 'border border-transparent hover:border-white/[0.08] hover:bg-white/[0.05]'}`}
+              >
                 <p className="text-xs text-white/40">{month.label}</p>
                 <p className="text-sm font-bold text-accent-light mt-1">${microsDetailed(month.totalMicros)} UP</p>
                 <p className="text-[10px] text-white/20">{month.count} rewards</p>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -323,17 +594,57 @@ export default function LicenseDetailPage({ api }) {
       {chartData.length > 1 && (
         <div className="glass p-4 sm:p-6 mb-4">
           <div className="flex items-start justify-between gap-3 mb-4">
-            <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider">Daily Rewards</h2>
-            <p className="text-[10px] text-white/30 uppercase tracking-[0.18em]">Brush to zoom</p>
+            <div>
+              <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider">Daily Rewards</h2>
+              <p className="text-[11px] text-white/30 mt-1">
+                {selectedChartMonth
+                  ? `Focused on ${selectedChartMonth.label}${visibleDailyRewardRangeLabel ? ` · ${visibleDailyRewardRangeLabel}` : ''}`
+                  : visibleDailyRewardRangeLabel || 'Showing the current visible range'}
+              </p>
+            </div>
+            <p className="text-[10px] text-white/30 uppercase tracking-[0.18em]">Navigator below</p>
           </div>
+
+          {dailyRewardInsights && (
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 mb-5">
+              <div className="glass-subtle rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Best Day</p>
+                <p className="text-sm font-semibold text-white mt-1">{formatDailyRewardAmount(dailyRewardInsights.bestDay.reward)}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyRewardInsights.bestDay.date}</p>
+              </div>
+              <div className="glass-subtle rounded-xl p-3">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Average / Day</p>
+                <p className="text-sm font-semibold text-white mt-1">{formatDailyRewardAmount(dailyRewardInsights.averagePerDay)}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyRewardInsights.dayCount} visible day buckets</p>
+              </div>
+              <div className="glass-subtle rounded-xl p-3 col-span-2 lg:col-span-1">
+                <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Day</p>
+                <p className="text-sm font-semibold text-white mt-1">{formatDailyRewardAmount(dailyRewardInsights.latestDay.reward)}</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyRewardInsights.latestDay.date}</p>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
             <div style={{ minWidth: `${dailyRewardChartMinWidth}px` }}>
-              <ResponsiveContainer width="100%" height={310}>
-                <BarChart data={chartData} margin={{ top: 8, right: 12, left: -12, bottom: 28 }}>
+              <ResponsiveContainer width="100%" height={340}>
+                <ComposedChart data={visibleDailyRewardData} margin={{ top: 8, right: 12, left: -12, bottom: 20 }}>
                   <defs>
-                    <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id="dailyRewardArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#818cf8" stopOpacity={0.22} />
+                      <stop offset="100%" stopColor="#818cf8" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="dailyRewardBar" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#818cf8" stopOpacity={0.9} />
                       <stop offset="100%" stopColor="#6366f1" stopOpacity={0.6} />
+                    </linearGradient>
+                    <linearGradient id="dailyRewardPeak" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#22c55e" stopOpacity={0.92} />
+                      <stop offset="100%" stopColor="#15803d" stopOpacity={0.52} />
+                    </linearGradient>
+                    <linearGradient id="dailyRewardLatest" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.92} />
+                      <stop offset="100%" stopColor="#155e75" stopOpacity={0.52} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
@@ -348,29 +659,75 @@ export default function LicenseDetailPage({ api }) {
                     stroke="rgba(255,255,255,0.06)"
                     tickFormatter={(value) => `$${value}`}
                   />
-                  <Tooltip
-                    cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-                    contentStyle={{ background: 'rgba(10,10,26,0.9)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', fontSize: '13px', color: '#fff', padding: '10px 14px' }}
-                    labelStyle={{ color: 'rgba(255,255,255,0.5)', marginBottom: '4px' }}
-                    formatter={(val) => [`$${val} UP`, 'Reward']}
+                  <Tooltip content={<DailyRewardTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                  {dailyRewardInsights && (
+                    <ReferenceLine
+                      y={dailyRewardInsights.averagePerDay}
+                      stroke="rgba(255,255,255,0.22)"
+                      strokeDasharray="4 4"
+                    />
+                  )}
+                  <Area
+                    type="monotone"
+                    dataKey="reward"
+                    stroke="rgba(129,140,248,0.45)"
+                    strokeWidth={1.5}
+                    fill="url(#dailyRewardArea)"
+                    dot={false}
+                    activeDot={false}
                   />
-                  <Bar dataKey="reward" fill="url(#barGrad)" radius={[6, 6, 0, 0]} maxBarSize={18} />
-                  <Brush
-                    dataKey="date"
-                    height={24}
-                    travellerWidth={10}
-                    stroke="rgba(129,140,248,0.65)"
-                    fill="rgba(129,140,248,0.08)"
-                    startIndex={dailyRewardBrushStartIndex}
-                    endIndex={chartData.length - 1}
-                    tickFormatter={() => ''}
+                  <Bar dataKey="reward" shape={(shapeProps) => <TrendCandleBar {...shapeProps} />} maxBarSize={18}>
+                    {visibleDailyRewardData.map((entry) => (
+                      <Cell
+                        key={entry.dayKey}
+                        fill={entry.isPeak ? 'url(#dailyRewardPeak)' : entry.isLatest ? 'url(#dailyRewardLatest)' : 'url(#dailyRewardBar)'}
+                      />
+                    ))}
+                  </Bar>
+                  <Line
+                    type="monotone"
+                    dataKey="rollingAverage"
+                    stroke="#22d3ee"
+                    strokeWidth={2.2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#22d3ee', stroke: 'rgba(10,10,26,0.9)', strokeWidth: 2 }}
                   />
-                </BarChart>
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </div>
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-3 py-3 mt-4">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">Timeline Navigator</p>
+              <p className="text-[10px] text-white/26 uppercase tracking-[0.18em]">Drag to adjust focus</p>
+            </div>
+            <ResponsiveContainer width="100%" height={84}>
+              <ComposedChart data={chartData} margin={{ top: 6, right: 10, left: -12, bottom: 0 }} key={`${selectedChartMonthKey}-${chartData.length}`}>
+                <defs>
+                  <linearGradient id="dailyRewardNavigator" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
+                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.06} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="date" hide />
+                <YAxis hide domain={[0, 'dataMax']} />
+                <Area type="monotone" dataKey="reward" stroke="rgba(129,140,248,0.45)" strokeWidth={1.2} fill="url(#dailyRewardNavigator)" dot={false} activeDot={false} />
+                <Brush
+                  dataKey="date"
+                  height={24}
+                  travellerWidth={10}
+                  stroke="rgba(129,140,248,0.72)"
+                  fill="rgba(129,140,248,0.10)"
+                  startIndex={dailyRewardBrushRange.startIndex}
+                  endIndex={dailyRewardBrushRange.endIndex}
+                  onChange={handleDailyRewardBrushChange}
+                  tickFormatter={() => ''}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
           <p className="text-[11px] text-white/32 mt-3">
-            Drag the brush handles to zoom into a smaller window, or scroll sideways when the visible range is wider than the card.
+            Same-day rewards are merged into one daily total. Select a month card to jump straight to that section, then use the navigator below to fine-tune the visible window.
           </p>
         </div>
       )}

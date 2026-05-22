@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
+  Area,
   Brush,
   BarChart,
   Bar,
@@ -24,6 +25,7 @@ import {
   ZAxis,
 } from 'recharts';
 import { RefreshCw, Wallet, TrendingUp, Clock, Users } from 'lucide-react';
+import TrendCandleBar from '../components/common/TrendCandleBar';
 import StatCard from '../components/dashboard/StatCard';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
@@ -31,7 +33,7 @@ import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
-import { addDaysToRewardDayKey, formatRewardDayLabel, getRewardDayKey, microsToUsd, truncateHex } from '../utils/formatters';
+import { addDaysToRewardDayKey, formatRewardDayLabel, formatRewardMonthLabel, getRewardDayKey, getRewardMonthKey, microsToUsd, truncateHex } from '../utils/formatters';
 import {
   buildCloneIndexMap,
   getLicenseBackendName,
@@ -55,6 +57,9 @@ const DATE_RANGE_LABELS = {
   custom: 'Custom Range',
 };
 const COMBINED_EARNINGS_DEFAULT_WINDOW = 45;
+const COMBINED_EARNINGS_MIN_WIDTH = 840;
+const COMBINED_EARNINGS_BAR_WIDTH = 22;
+const TOOLTIP_BREAKDOWN_LIMIT = 6;
 
 function tooltipContainer(children, label) {
   return (
@@ -96,6 +101,7 @@ function DailyEarningsTooltip({ active, payload, label }) {
 
   const point = payload[0].payload;
   const deltaPrefix = point.deltaAmount > 0 ? '+' : '';
+  const hasCombinedBreakdown = point.count > 1 && point.licenseBreakdown?.length;
 
   return tooltipContainer(
     <>
@@ -103,7 +109,9 @@ function DailyEarningsTooltip({ active, payload, label }) {
         ${point.amount.toFixed(2)} <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 400 }}>UP</span>
       </p>
       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 4, fontFamily: 'monospace' }}>
-        {point.count} allocation{point.count !== 1 ? 's' : ''}
+        {hasCombinedBreakdown
+          ? `${point.count} allocations across ${point.licenseBreakdown.length} license${point.licenseBreakdown.length === 1 ? '' : 's'}`
+          : `${point.count} allocation${point.count !== 1 ? 's' : ''}`}
       </p>
       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>
         7d avg ${point.rollingAverage.toFixed(2)} UP
@@ -111,6 +119,32 @@ function DailyEarningsTooltip({ active, payload, label }) {
       <p style={{ fontSize: 10, color: point.deltaAmount >= 0 ? '#22c55e' : '#f59e0b', marginTop: 2 }}>
         {point.deltaIndex === 0 ? 'First visible day' : `${deltaPrefix}${point.deltaAmount.toFixed(2)} UP vs previous day`}
       </p>
+      {hasCombinedBreakdown ? (
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+            Breakdown
+          </p>
+          {point.licenseBreakdown.slice(0, TOOLTIP_BREAKDOWN_LIMIT).map((entry) => (
+            <div
+              key={entry.licenseId}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 4 }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <p style={{ color: 'rgba(255,255,255,0.82)', fontSize: 10, margin: 0 }}>{entry.label}</p>
+                <p style={{ color: 'rgba(255,255,255,0.34)', fontSize: 10, marginTop: 1 }}>{entry.count} allocation{entry.count === 1 ? '' : 's'}</p>
+              </div>
+              <span style={{ color: 'rgba(255,255,255,0.88)', fontSize: 10, fontFamily: 'monospace', flexShrink: 0 }}>
+                ${entry.amount.toFixed(2)}
+              </span>
+            </div>
+          ))}
+          {point.licenseBreakdown.length > TOOLTIP_BREAKDOWN_LIMIT ? (
+            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 10, marginTop: 6 }}>
+              +{point.licenseBreakdown.length - TOOLTIP_BREAKDOWN_LIMIT} more contributor{point.licenseBreakdown.length - TOOLTIP_BREAKDOWN_LIMIT === 1 ? '' : 's'}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </>,
     label
   );
@@ -264,6 +298,8 @@ export default function AnalyticsPage({ api }) {
   const { getOperator } = useOperatorTags(user?.id);
   const dateRange = useDateRangeFilter(allocations || [], (item) => item.completedAt, 'page-state:analytics');
   const filteredAllocations = dateRange.filtered || [];
+  const [selectedTrendMonthKey, setSelectedTrendMonthKey] = useState('all');
+  const [dailyTrendBrushRange, setDailyTrendBrushRange] = useState({ startIndex: 0, endIndex: 0 });
 
   const activeDateRangeLabel = useMemo(() => {
     if (dateRange.preset === 'custom') {
@@ -447,15 +483,31 @@ export default function AnalyticsPage({ api }) {
     return uptimeValues.reduce((sum, value) => sum + value, 0) / uptimeValues.length;
   }, [licenseAnalytics]);
 
+  const licenseNameById = useMemo(
+    () => Object.fromEntries(licenseAnalytics.map((license) => [license.licenseId, license.displayName])),
+    [licenseAnalytics]
+  );
+
   const dailyTrendData = useMemo(() => {
     const byDay = filteredAllocations.reduce((map, allocation) => {
       const dayKey = getRewardDayKey(allocation.completedAt);
       if (!map[dayKey]) {
-        map[dayKey] = { dayKey, label: formatRewardDayLabel(dayKey), amount: 0, count: 0 };
+        map[dayKey] = { dayKey, label: formatRewardDayLabel(dayKey), amount: 0, count: 0, breakdownByLicense: {} };
       }
 
       map[dayKey].amount += allocation.amountMicros / 1_000_000;
       map[dayKey].count += 1;
+      const licenseId = allocation.licenseId;
+      const currentLicenseBreakdown = map[dayKey].breakdownByLicense[licenseId] || {
+        licenseId,
+        label: licenseNameById[licenseId] || truncateHex(licenseId),
+        amount: 0,
+        count: 0,
+      };
+
+      currentLicenseBreakdown.amount += allocation.amountMicros / 1_000_000;
+      currentLicenseBreakdown.count += 1;
+      map[dayKey].breakdownByLicense[licenseId] = currentLicenseBreakdown;
       return map;
     }, {});
 
@@ -470,8 +522,20 @@ export default function AnalyticsPage({ api }) {
     let deltaIndex = 0;
 
     while (currentDayKey <= lastDayKey) {
-      const existingDay = byDay[currentDayKey] || { dayKey: currentDayKey, label: formatRewardDayLabel(currentDayKey), amount: 0, count: 0 };
+      const existingDay = byDay[currentDayKey] || {
+        dayKey: currentDayKey,
+        label: formatRewardDayLabel(currentDayKey),
+        amount: 0,
+        count: 0,
+        breakdownByLicense: {},
+      };
       const roundedAmount = Number(existingDay.amount.toFixed(2));
+      const licenseBreakdown = Object.values(existingDay.breakdownByLicense)
+        .map((entry) => ({
+          ...entry,
+          amount: Number(entry.amount.toFixed(2)),
+        }))
+        .sort((left, right) => right.amount - left.amount);
 
       rollingWindow.push(roundedAmount);
       if (rollingWindow.length > 7) {
@@ -481,8 +545,11 @@ export default function AnalyticsPage({ api }) {
       const rollingAverage = rollingWindow.reduce((sum, value) => sum + value, 0) / rollingWindow.length;
 
       filledDays.push({
-        ...existingDay,
+        dayKey: existingDay.dayKey,
+        label: existingDay.label,
         amount: roundedAmount,
+        count: existingDay.count,
+        licenseBreakdown,
         rollingAverage: Number(rollingAverage.toFixed(2)),
         deltaAmount: Number((roundedAmount - previousAmount).toFixed(2)),
         deltaIndex,
@@ -497,24 +564,44 @@ export default function AnalyticsPage({ api }) {
 
     return filledDays.map((entry, index) => ({
       ...entry,
+      monthKey: getRewardMonthKey(entry.dayKey),
       isPeak: peakAmount > 0 && entry.amount === peakAmount,
       isLatest: index === filledDays.length - 1,
     }));
-  }, [filteredAllocations]);
+  }, [filteredAllocations, licenseNameById]);
+
+  const visibleDailyTrendData = useMemo(() => {
+    if (!dailyTrendData.length) {
+      return [];
+    }
+
+    const safeStart = Math.max(0, Math.min(dailyTrendBrushRange.startIndex, dailyTrendData.length - 1));
+    const safeEnd = Math.max(safeStart, Math.min(dailyTrendBrushRange.endIndex, dailyTrendData.length - 1));
+
+    return dailyTrendData.slice(safeStart, safeEnd + 1);
+  }, [dailyTrendData, dailyTrendBrushRange]);
+
+  const visibleDailyTrendRangeLabel = useMemo(() => {
+    if (!visibleDailyTrendData.length) {
+      return null;
+    }
+
+    return `${visibleDailyTrendData[0].label} - ${visibleDailyTrendData[visibleDailyTrendData.length - 1].label}`;
+  }, [visibleDailyTrendData]);
 
   const dailyEarningsInsights = useMemo(() => {
-    if (!dailyTrendData.length) return null;
+    if (!visibleDailyTrendData.length) return null;
 
-    const bestDay = dailyTrendData.reduce((bestEntry, entry) => (entry.amount > bestEntry.amount ? entry : bestEntry), dailyTrendData[0]);
-    const latestDay = dailyTrendData[dailyTrendData.length - 1];
-    const averagePerDay = dailyTrendData.reduce((sum, entry) => sum + entry.amount, 0) / dailyTrendData.length;
+    const bestDay = visibleDailyTrendData.reduce((bestEntry, entry) => (entry.amount > bestEntry.amount ? entry : bestEntry), visibleDailyTrendData[0]);
+    const latestDay = visibleDailyTrendData[visibleDailyTrendData.length - 1];
+    const averagePerDay = visibleDailyTrendData.reduce((sum, entry) => sum + entry.amount, 0) / visibleDailyTrendData.length;
 
     return {
       bestDay,
       latestDay,
       averagePerDay: Number(averagePerDay.toFixed(2)),
     };
-  }, [dailyTrendData]);
+  }, [visibleDailyTrendData]);
 
   const dailyTrendBrushStartIndex = useMemo(() => {
     if (!dailyTrendData.length) {
@@ -523,6 +610,74 @@ export default function AnalyticsPage({ api }) {
 
     return Math.max(0, dailyTrendData.length - COMBINED_EARNINGS_DEFAULT_WINDOW);
   }, [dailyTrendData]);
+
+  const dailyTrendMonthWindows = useMemo(() => {
+    const monthsByKey = new Map();
+
+    dailyTrendData.forEach((entry, index) => {
+      const current = monthsByKey.get(entry.monthKey) || {
+        key: entry.monthKey,
+        label: formatRewardMonthLabel(entry.monthKey),
+        startIndex: index,
+        endIndex: index,
+        amount: 0,
+        activeDays: 0,
+      };
+
+      current.endIndex = index;
+      current.amount += entry.amount;
+      if (entry.amount > 0) {
+        current.activeDays += 1;
+      }
+
+      monthsByKey.set(entry.monthKey, current);
+    });
+
+    return Array.from(monthsByKey.values()).map((month) => ({
+      ...month,
+      amount: Number(month.amount.toFixed(2)),
+    }));
+  }, [dailyTrendData]);
+
+  const selectedTrendMonth = useMemo(
+    () => dailyTrendMonthWindows.find((month) => month.key === selectedTrendMonthKey) || null,
+    [dailyTrendMonthWindows, selectedTrendMonthKey]
+  );
+
+  const dailyTrendChartMinWidth = useMemo(
+    () => Math.max(COMBINED_EARNINGS_MIN_WIDTH, visibleDailyTrendData.length * COMBINED_EARNINGS_BAR_WIDTH),
+    [visibleDailyTrendData]
+  );
+
+  useEffect(() => {
+    if (selectedTrendMonthKey === 'all') {
+      return;
+    }
+
+    if (!selectedTrendMonth) {
+      setSelectedTrendMonthKey('all');
+    }
+  }, [selectedTrendMonth, selectedTrendMonthKey]);
+
+  useEffect(() => {
+    if (!dailyTrendData.length) {
+      setDailyTrendBrushRange({ startIndex: 0, endIndex: 0 });
+      return;
+    }
+
+    if (selectedTrendMonth) {
+      setDailyTrendBrushRange({
+        startIndex: selectedTrendMonth.startIndex,
+        endIndex: selectedTrendMonth.endIndex,
+      });
+      return;
+    }
+
+    setDailyTrendBrushRange({
+      startIndex: dailyTrendBrushStartIndex,
+      endIndex: dailyTrendData.length - 1,
+    });
+  }, [dailyTrendBrushStartIndex, dailyTrendData.length, selectedTrendMonth]);
 
   const statusMixData = useMemo(() => {
     const total = licenseAnalytics.length || 1;
@@ -678,6 +833,47 @@ export default function AnalyticsPage({ api }) {
     [uloDistributionData]
   );
 
+  const handleSelectTrendMonth = (monthKey) => {
+    if (!dailyTrendData.length || monthKey === 'all') {
+      setSelectedTrendMonthKey('all');
+      setDailyTrendBrushRange({
+        startIndex: dailyTrendBrushStartIndex,
+        endIndex: Math.max(0, dailyTrendData.length - 1),
+      });
+      return;
+    }
+
+    const targetMonth = dailyTrendMonthWindows.find((month) => month.key === monthKey);
+
+    if (!targetMonth) {
+      return;
+    }
+
+    setSelectedTrendMonthKey(targetMonth.key);
+    setDailyTrendBrushRange({
+      startIndex: targetMonth.startIndex,
+      endIndex: targetMonth.endIndex,
+    });
+  };
+
+  const handleDailyTrendBrushChange = ({ startIndex, endIndex }) => {
+    if (!dailyTrendData.length) {
+      return;
+    }
+
+    const nextStartIndex = typeof startIndex === 'number' ? startIndex : 0;
+    const nextEndIndex = typeof endIndex === 'number' ? endIndex : dailyTrendData.length - 1;
+
+    if (selectedTrendMonth && (nextStartIndex !== selectedTrendMonth.startIndex || nextEndIndex !== selectedTrendMonth.endIndex)) {
+      setSelectedTrendMonthKey('all');
+    }
+
+    setDailyTrendBrushRange({
+      startIndex: nextStartIndex,
+      endIndex: nextEndIndex,
+    });
+  };
+
   if (isLoading) {
     return <DashboardSkeleton />;
   }
@@ -746,7 +942,7 @@ export default function AnalyticsPage({ api }) {
         eyebrow="Reward Flow"
         title="Combined daily earnings"
         description="Shows total daily UP across all visible licenses, plus a 7-day earning trend and daily baseline."
-        footer={dailyTrendData.length ? `${dailyTrendData.length} day buckets in the visible range${dailyEarningsInsights ? ` · Best day ${dailyEarningsInsights.bestDay.label}` : ''}.` : 'No reward activity in this date range.'}
+        footer={visibleDailyTrendData.length ? `${visibleDailyTrendData.length} day buckets currently in focus${dailyEarningsInsights ? ` · Best day ${dailyEarningsInsights.bestDay.label}` : ''}.` : 'No reward activity in this date range.'}
       >
           {dailyTrendData.length ? (
             <>
@@ -781,6 +977,42 @@ export default function AnalyticsPage({ api }) {
                 </div>
               ) : null}
 
+              {dailyTrendMonthWindows.length ? (
+                <div className="mb-5">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">Month Focus</p>
+                      <p className="text-[11px] text-white/35 mt-1">Jump straight to a month, then refine the view with the navigator below.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTrendMonth('all')}
+                      className={`inline-flex items-center justify-center rounded-xl border px-3 py-2 text-xs transition-colors ${selectedTrendMonthKey === 'all'
+                        ? 'border-accent-light/40 bg-accent-light/15 text-accent-light'
+                        : 'border-white/[0.08] bg-white/[0.03] text-white/55 hover:bg-white/[0.06] hover:text-white/75'}`}
+                    >
+                      All visible months
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {dailyTrendMonthWindows.map((month) => (
+                      <button
+                        key={month.key}
+                        type="button"
+                        onClick={() => handleSelectTrendMonth(month.key)}
+                        className={`rounded-xl border px-3 py-3 text-left transition-colors ${selectedTrendMonthKey === month.key
+                          ? 'border-cyan-300/35 bg-cyan-400/12'
+                          : 'border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.05]'}`}
+                      >
+                        <p className="text-[11px] text-white/40">{month.label}</p>
+                        <p className="text-sm font-semibold text-white mt-1">{formatUsdValue(month.amount)}</p>
+                        <p className="text-[10px] text-white/28 mt-1">{month.activeDays} active day{month.activeDays === 1 ? '' : 's'}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {dailyEarningsInsights && (
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 mb-6">
                   <div className="glass-subtle rounded-xl p-3">
@@ -801,72 +1033,122 @@ export default function AnalyticsPage({ api }) {
                 </div>
               )}
 
-              <ResponsiveContainer width="100%" height={420}>
-                <ComposedChart data={dailyTrendData} margin={{ top: 8, right: 12, left: -16, bottom: 28 }}>
-                  <defs>
-                    <linearGradient id="combinedDailyBar" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#818cf8" stopOpacity={0.95} />
-                      <stop offset="100%" stopColor="#312e81" stopOpacity={0.45} />
-                    </linearGradient>
-                    <linearGradient id="combinedDailyPeak" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#22c55e" stopOpacity={0.95} />
-                      <stop offset="100%" stopColor="#15803d" stopOpacity={0.45} />
-                    </linearGradient>
-                    <linearGradient id="combinedDailyLatest" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.95} />
-                      <stop offset="100%" stopColor="#155e75" stopOpacity={0.45} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}
-                    axisLine={false}
-                    tickLine={false}
-                    minTickGap={26}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(value) => `$${value}`}
-                  />
-                  <Tooltip content={<DailyEarningsTooltip />} cursor={{ fill: 'rgba(129,140,248,0.06)' }} />
-                  {dailyEarningsInsights && (
-                    <ReferenceLine
-                      y={dailyEarningsInsights.averagePerDay}
-                      stroke="rgba(255,255,255,0.22)"
-                      strokeDasharray="4 4"
-                    />
-                  )}
-                  <Bar dataKey="amount" radius={[8, 8, 2, 2]} maxBarSize={18}>
-                    {dailyTrendData.map((entry) => (
-                      <Cell
-                        key={entry.dayKey}
-                        fill={entry.isPeak ? 'url(#combinedDailyPeak)' : entry.isLatest ? 'url(#combinedDailyLatest)' : 'url(#combinedDailyBar)'}
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">Visible Window</p>
+                  <p className="text-[11px] text-white/35 mt-1">
+                    {selectedTrendMonth
+                      ? `Focused on ${selectedTrendMonth.label}${visibleDailyTrendRangeLabel ? ` · ${visibleDailyTrendRangeLabel}` : ''}`
+                      : visibleDailyTrendRangeLabel || 'Showing the current visible window'}
+                  </p>
+                </div>
+                <p className="text-[10px] text-white/30 uppercase tracking-[0.18em]">Navigator below</p>
+              </div>
+
+              <div className="overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
+                <div style={{ minWidth: `${dailyTrendChartMinWidth}px` }}>
+                  <ResponsiveContainer width="100%" height={430}>
+                    <ComposedChart data={visibleDailyTrendData} margin={{ top: 8, right: 12, left: -16, bottom: 16 }}>
+                      <defs>
+                        <linearGradient id="combinedDailyArea" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#818cf8" stopOpacity={0.22} />
+                          <stop offset="100%" stopColor="#818cf8" stopOpacity={0.02} />
+                        </linearGradient>
+                        <linearGradient id="combinedDailyBar" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#818cf8" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#312e81" stopOpacity={0.45} />
+                        </linearGradient>
+                        <linearGradient id="combinedDailyPeak" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#22c55e" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#15803d" stopOpacity={0.45} />
+                        </linearGradient>
+                        <linearGradient id="combinedDailyLatest" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="#155e75" stopOpacity={0.45} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}
+                        axisLine={false}
+                        tickLine={false}
+                        minTickGap={26}
                       />
-                    ))}
-                  </Bar>
-                  <Line
-                    type="monotone"
-                    dataKey="rollingAverage"
-                    stroke="#22d3ee"
-                    strokeWidth={2.4}
-                    dot={false}
-                    activeDot={{ r: 4, fill: '#22d3ee', stroke: 'rgba(10,10,26,0.9)', strokeWidth: 2 }}
-                  />
-                  <Brush
-                    dataKey="label"
-                    height={24}
-                    travellerWidth={10}
-                    stroke="rgba(129,140,248,0.65)"
-                    fill="rgba(129,140,248,0.08)"
-                    startIndex={dailyTrendBrushStartIndex}
-                    endIndex={dailyTrendData.length - 1}
-                    tickFormatter={() => ''}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
+                      <YAxis
+                        tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.25)', fontFamily: 'monospace' }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(value) => `$${value}`}
+                      />
+                      <Tooltip content={<DailyEarningsTooltip />} cursor={{ fill: 'rgba(129,140,248,0.06)' }} />
+                      {dailyEarningsInsights && (
+                        <ReferenceLine
+                          y={dailyEarningsInsights.averagePerDay}
+                          stroke="rgba(255,255,255,0.22)"
+                          strokeDasharray="4 4"
+                        />
+                      )}
+                      <Area
+                        type="monotone"
+                        dataKey="amount"
+                        stroke="rgba(129,140,248,0.42)"
+                        strokeWidth={1.5}
+                        fill="url(#combinedDailyArea)"
+                        dot={false}
+                        activeDot={false}
+                      />
+                      <Bar dataKey="amount" shape={(shapeProps) => <TrendCandleBar {...shapeProps} />} maxBarSize={18}>
+                        {visibleDailyTrendData.map((entry) => (
+                          <Cell
+                            key={entry.dayKey}
+                            fill={entry.isPeak ? 'url(#combinedDailyPeak)' : entry.isLatest ? 'url(#combinedDailyLatest)' : 'url(#combinedDailyBar)'}
+                          />
+                        ))}
+                      </Bar>
+                      <Line
+                        type="monotone"
+                        dataKey="rollingAverage"
+                        stroke="#22d3ee"
+                        strokeWidth={2.4}
+                        dot={false}
+                        activeDot={{ r: 4, fill: '#22d3ee', stroke: 'rgba(10,10,26,0.9)', strokeWidth: 2 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-3 py-3 mt-4">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">Timeline Navigator</p>
+                  <p className="text-[10px] text-white/26 uppercase tracking-[0.18em]">Drag to adjust focus</p>
+                </div>
+                <ResponsiveContainer width="100%" height={86}>
+                  <ComposedChart data={dailyTrendData} margin={{ top: 6, right: 10, left: -16, bottom: 0 }} key={`${selectedTrendMonthKey}-${dailyTrendData.length}`}>
+                    <defs>
+                      <linearGradient id="combinedDailyNavigator" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
+                        <stop offset="100%" stopColor="#6366f1" stopOpacity={0.06} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="label" hide />
+                    <YAxis hide domain={[0, 'dataMax']} />
+                    <Area type="monotone" dataKey="amount" stroke="rgba(129,140,248,0.45)" strokeWidth={1.2} fill="url(#combinedDailyNavigator)" dot={false} activeDot={false} />
+                    <Brush
+                      dataKey="label"
+                      height={24}
+                      travellerWidth={10}
+                      stroke="rgba(129,140,248,0.72)"
+                      fill="rgba(129,140,248,0.10)"
+                      startIndex={dailyTrendBrushRange.startIndex}
+                      endIndex={dailyTrendBrushRange.endIndex}
+                      onChange={handleDailyTrendBrushChange}
+                      tickFormatter={() => ''}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
 
               <div className="flex flex-wrap items-center gap-4 mt-4 text-[10px] text-white/35 uppercase tracking-[0.18em]">
                 <div className="flex items-center gap-2">
