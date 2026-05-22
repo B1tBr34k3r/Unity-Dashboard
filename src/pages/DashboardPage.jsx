@@ -12,10 +12,6 @@ import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
 import { buildCloneIndexMap, getLicenseBackendName, getLicenseDisplayName } from '../utils/licenseDisplay';
 
-function hasBoundDevice(license) {
-  return Boolean(license?.deviceId || license?.deviceName);
-}
-
 function formatSignedUsd(micros) {
   if (micros > 0) {
     return `+$${microsToUsd(micros)}`;
@@ -28,16 +24,16 @@ function formatSignedUsd(micros) {
   return '$0.00';
 }
 
-function buildDailyInsight(allocations, onlineLicenseIds, getDisplayName) {
-  const onlineAllocations = (allocations || []).filter((allocation) => onlineLicenseIds.has(String(allocation.licenseId)));
+function buildDailyInsight(allocations, getDisplayName) {
+  const relevantAllocations = Array.isArray(allocations) ? allocations : [];
 
-  if (!onlineAllocations.length) {
+  if (!relevantAllocations.length) {
     return null;
   }
 
   const byDay = {};
 
-  onlineAllocations.forEach((allocation) => {
+  relevantAllocations.forEach((allocation) => {
     const dayKey = getRewardDayKey(allocation.completedAt);
 
     if (!byDay[dayKey]) {
@@ -55,8 +51,12 @@ function buildDailyInsight(allocations, onlineLicenseIds, getDisplayName) {
   });
 
   const dayKeys = Object.keys(byDay).sort((left, right) => left.localeCompare(right));
-  const latestDayKey = dayKeys[dayKeys.length - 1];
-  const previousDayKey = dayKeys[dayKeys.length - 2] || null;
+  const todayDayKey = getRewardDayKey(new Date());
+  const effectiveDayKeys = dayKeys.length > 2 && dayKeys[dayKeys.length - 1] === todayDayKey
+    ? dayKeys.slice(0, -1)
+    : dayKeys;
+  const latestDayKey = effectiveDayKeys[effectiveDayKeys.length - 1];
+  const previousDayKey = effectiveDayKeys[effectiveDayKeys.length - 2] || null;
   const latestDay = byDay[latestDayKey];
 
   if (!previousDayKey) {
@@ -98,32 +98,31 @@ export default function DashboardPage({ api }) {
   const summaryData = summary?.[0] || null;
   const { getOperator, allOperators } = useOperatorTags(user?.id);
   const { getLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
+  const { getPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const dateRange = useDateRangeFilter(allocations, (item) => item.completedAt, 'page-state:dashboard');
   const filteredAllocations = dateRange.filtered;
   const licenseInfoById = useMemo(
     () => Object.fromEntries((licenses || []).map((license) => [license.id, license])),
     [licenses]
   );
-  const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
-    [presetTags, licenseInfoById, cloneTagOrder]
-  );
-  const onlineLicenseIds = useMemo(
-    () => new Set((licenses || []).filter((license) => hasBoundDevice(license) && license.isOnline).map((license) => String(license.id))),
-    [licenses]
+  const tagIndexById = useMemo(
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+      clone: cloneTagOrder,
+      work: workTagOrder,
+    }),
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
   );
 
   const getDisplayName = (licenseId) => getLicenseDisplayName({
     customLabel: getLabel(licenseId),
     backendName: getLicenseBackendName(licenseInfoById[licenseId]),
     presetTag: getPresetTag(licenseId),
-    cloneIndex: cloneIndexById[licenseId] || null,
+    tagIndex: tagIndexById[licenseId] || null,
   }) || `License ${licenseId}`;
 
   const dailyInsight = useMemo(
-    () => buildDailyInsight(allocations, onlineLicenseIds, getDisplayName),
-    [allocations, onlineLicenseIds, getLabel, getPresetTag, cloneIndexById, licenseInfoById]
+    () => buildDailyInsight(allocations, getDisplayName),
+    [allocations, getLabel, getPresetTag, tagIndexById, licenseInfoById]
   );
 
   const monthData = useMemo(() => {
@@ -313,7 +312,7 @@ export default function DashboardPage({ api }) {
               <div className="glass-subtle rounded-xl p-3">
                 <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Day</p>
                 <p className="text-sm font-semibold text-white mt-1">{dailyInsight.latestLabel}</p>
-                <p className="text-[10px] text-white/35 mt-1">{dailyInsight.rewardedLicenseCount} rewarded online licenses</p>
+                <p className="text-[10px] text-white/35 mt-1">{dailyInsight.rewardedLicenseCount} rewarded licenses</p>
               </div>
               <div className="glass-subtle rounded-xl p-3">
                 <p className="text-[10px] uppercase tracking-wider text-white/30">Latest Total</p>

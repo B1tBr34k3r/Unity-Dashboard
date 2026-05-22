@@ -10,7 +10,7 @@ import { useOperatorTags } from '../hooks/useOperatorTags';
 export default function SettingsPage({ api }) {
   const { user, manualRefresh, logout, isLoading, historyInfo, resetRewardHistoryCache } = api;
   const { labels, replaceLabels, resetLabels } = useLicenseLabels(user?.id);
-  const { presetTags, cloneTagOrder, replacePresetTags, resetPresetTags } = useLicensePresetTags(user?.id);
+  const { presetTags, cloneTagOrder, workTagOrder, replacePresetTags, resetPresetTags } = useLicensePresetTags(user?.id);
   const { operators, replaceOperators, resetOperators } = useOperatorTags(user?.id);
   const { deviceHistory, replaceDeviceHistory, resetDeviceHistory } = useLicenseDeviceHistory(user?.id);
   const importInputRef = useRef(null);
@@ -95,6 +95,7 @@ export default function SettingsPage({ api }) {
         labels,
         presetTags,
         cloneTagOrder,
+        workTagOrder,
         operators,
         deviceHistory,
       },
@@ -140,6 +141,7 @@ export default function SettingsPage({ api }) {
       const nextLabels = importedCustomData?.labels || {};
       const nextPresetTags = importedCustomData?.presetTags || {};
       const nextCloneTagOrder = importedCustomData?.cloneTagOrder;
+      const nextWorkTagOrder = importedCustomData?.workTagOrder;
       const nextOperators = importedCustomData?.operators || {};
       const nextDeviceHistory = importedCustomData?.deviceHistory || {};
       const hasValidContent = [nextLabels, nextPresetTags, nextOperators, nextDeviceHistory].some(
@@ -159,7 +161,10 @@ export default function SettingsPage({ api }) {
       }
 
       replaceLabels(nextLabels);
-      replacePresetTags(nextPresetTags, nextCloneTagOrder);
+      replacePresetTags(nextPresetTags, {
+        cloneTagOrder: nextCloneTagOrder,
+        workTagOrder: nextWorkTagOrder,
+      });
       replaceOperators(nextOperators);
       replaceDeviceHistory(nextDeviceHistory);
       setTransferNotice({

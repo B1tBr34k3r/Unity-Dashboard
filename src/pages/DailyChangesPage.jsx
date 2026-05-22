@@ -23,10 +23,6 @@ const WINDOW_DAY_COUNTS = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function hasBoundDevice(license) {
-  return Boolean(license?.deviceId || license?.deviceName);
-}
-
 function startOfLocalDay(value) {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
@@ -125,7 +121,7 @@ function formatExactContributionReason(entries, perspective, action, totalMicros
   const remainderMicros = totalMicros - visibleMicros;
 
   if (remainder > 0 && remainderMicros > 0) {
-    parts.push(`${formatCountLabel(remainder, 'more online license')} ${action} ${formatUnsignedUsd(remainderMicros)}`);
+    parts.push(`${formatCountLabel(remainder, 'more rewarded license')} ${action} ${formatUnsignedUsd(remainderMicros)}`);
   }
 
   return `${totalLabel} ${formatSignedUsd(totalMicros)}: ${parts.join('; ')}.`;
@@ -147,6 +143,37 @@ function formatContinuingContributionReason(entries, totalMicros) {
   }
 
   return `Continuing licenses net ${formatSignedUsd(totalMicros)}: ${parts.join('; ')}.`;
+}
+
+function formatOperatorContributionReason(operatorName, entries, totalMicros) {
+  if (!entries.length) {
+    return `${formatOperatorName(operatorName)} netted ${formatSignedUsd(totalMicros)} day over day.`;
+  }
+
+  const visibleEntries = entries.slice(0, 2);
+  const parts = visibleEntries.map((entry) => {
+    const deviceName = getEntryDeviceName(entry, entry.diffMicros >= 0 ? 'current' : 'previous');
+    const causeSuffix = entry.snapshotCauseDetail ? ` ${entry.snapshotCauseDetail}` : '';
+
+    return `${formatLicenseDeviceReference(entry.name, deviceName)} ${entry.diffMicros >= 0 ? 'added' : 'lost'} ${formatUnsignedUsd(entry.diffMicros)}${causeSuffix}`;
+  });
+  const remainder = entries.length - visibleEntries.length;
+  const visibleMicros = sumMicros(visibleEntries, (entry) => entry.diffMicros);
+  const remainderMicros = totalMicros - visibleMicros;
+
+  if (remainder > 0 && remainderMicros !== 0) {
+    const remainderLabel = operatorName === '__unassigned__'
+      ? formatCountLabel(remainder, 'more unassigned license')
+      : formatCountLabel(remainder, `more ${formatOperatorName(operatorName)} license`);
+
+    parts.push(`${remainderLabel} ${remainderMicros >= 0 ? 'added' : 'lost'} ${formatUnsignedUsd(remainderMicros)}`);
+  }
+
+  const summaryLabel = operatorName === '__unassigned__'
+    ? 'Unassigned licenses (no operator tag)'
+    : `${formatOperatorName(operatorName)} licenses`;
+
+  return `${summaryLabel} net ${formatSignedUsd(totalMicros)}: ${parts.join('; ')}.`;
 }
 
 function formatDeviceShiftSuffix(entry) {
@@ -333,7 +360,7 @@ function sortByAbsoluteDiff(left, right) {
   return right.diffMicros - left.diffMicros;
 }
 
-function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicenseDay) {
+function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicenseDay, getOperator) {
   if (!previousDay) {
     return {
       ...day,
@@ -374,6 +401,7 @@ function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicense
     if (diffMicros !== 0) {
       const nextEntry = {
         licenseId,
+        operatorName: getOperator(licenseId) || '__unassigned__',
         name: activeContext.name || currentContext.name || previousContext.name,
         deviceName: activeContext.deviceName || currentContext.deviceName || previousContext.deviceName || '',
         currentDeviceName: currentContext.deviceName || '',
@@ -397,6 +425,9 @@ function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicense
     const currentAmount = day.operatorAmounts[operatorName] || 0;
     const previousAmount = previousDay.operatorAmounts[operatorName] || 0;
     const diffMicros = currentAmount - previousAmount;
+    const operatorEntries = licenseDiffs
+      .filter((entry) => entry.operatorName === operatorName)
+      .sort(sortByAbsoluteDiff);
 
     if (diffMicros !== 0) {
       operatorDiffs.push({
@@ -404,6 +435,7 @@ function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicense
         diffMicros,
         currentAmount,
         previousAmount,
+        entries: operatorEntries,
       });
     }
   });
@@ -457,14 +489,18 @@ function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicense
   if (reasons.length < 3 && dominantOperator) {
     reasons.push({
       tone: dominantOperator.diffMicros >= 0 ? 'positive' : 'negative',
-      text: `${formatOperatorName(dominantOperator.operatorName)} netted ${formatSignedUsd(dominantOperator.diffMicros)} day over day.`,
+      text: formatOperatorContributionReason(
+        dominantOperator.operatorName,
+        dominantOperator.entries || [],
+        dominantOperator.diffMicros
+      ),
     });
   }
 
   if (!reasons.length && rewardedLicenseDelta !== 0) {
     reasons.push({
       tone: rewardedLicenseDelta >= 0 ? 'positive' : 'negative',
-      text: `${Math.abs(rewardedLicenseDelta)} ${rewardedLicenseDelta > 0 ? 'more' : 'fewer'} online license${Math.abs(rewardedLicenseDelta) === 1 ? '' : 's'} were rewarded than yesterday.`,
+      text: `${Math.abs(rewardedLicenseDelta)} ${rewardedLicenseDelta > 0 ? 'more' : 'fewer'} license${Math.abs(rewardedLicenseDelta) === 1 ? '' : 's'} were rewarded than yesterday.`,
     });
   }
 
@@ -489,7 +525,7 @@ function buildComparison(day, previousDay, getDisplayName, getSnapshotForLicense
   }
 
   if (rewardedLicenseDelta !== 0) {
-    summary += ` ${Math.abs(rewardedLicenseDelta)} ${rewardedLicenseDelta > 0 ? 'more' : 'fewer'} online license${Math.abs(rewardedLicenseDelta) === 1 ? '' : 's'} paid.`;
+    summary += ` ${Math.abs(rewardedLicenseDelta)} ${rewardedLicenseDelta > 0 ? 'more' : 'fewer'} license${Math.abs(rewardedLicenseDelta) === 1 ? '' : 's'} paid.`;
   }
 
   return {
@@ -570,7 +606,7 @@ function buildDailyChangeModel({ allocations, fromDayKey, toDayKey, getDisplayNa
     });
   }
 
-  const comparisons = days.map((day, index) => buildComparison(day, days[index - 1], getDisplayName, getSnapshotForLicenseDay));
+  const comparisons = days.map((day, index) => buildComparison(day, days[index - 1], getDisplayName, getSnapshotForLicenseDay, getOperator));
   const moversByLicenseId = {};
 
   comparisons.slice(1).forEach((comparison) => {
@@ -678,7 +714,7 @@ export default function DailyChangesPage({ api }) {
   const { deviceHistory } = useLicenseDeviceHistory(user?.id, licenses);
   const { days: snapshotDays, meta: snapshotMeta } = useLicenseSnapshotHistory(user?.id, licenses);
   const { getLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
+  const { getPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator } = useOperatorTags(user?.id);
   const navigate = useNavigate();
   const [preset, setPreset] = usePersistentPageState('page-state:daily-changes:preset', '7d');
@@ -690,38 +726,35 @@ export default function DailyChangesPage({ api }) {
     [licenses]
   );
 
-  const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
-    [presetTags, licenseInfoById, cloneTagOrder]
+  const tagIndexById = useMemo(
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+      clone: cloneTagOrder,
+      work: workTagOrder,
+    }),
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
   );
 
-  const onlineLicenseIds = useMemo(() => {
-    return new Set(
-      (licenses || [])
-        .filter((license) => hasBoundDevice(license) && license.isOnline)
-        .map((license) => String(license.id))
-    );
-  }, [licenses]);
+  const trackedAllocations = useMemo(() => (Array.isArray(allocations) ? allocations : []), [allocations]);
 
-  const onlineAllocations = useMemo(() => {
-    return (allocations || []).filter((allocation) => onlineLicenseIds.has(String(allocation.licenseId)));
-  }, [allocations, onlineLicenseIds]);
+  const trackedLicenseCount = useMemo(() => {
+    return new Set(trackedAllocations.map((allocation) => String(allocation.licenseId))).size;
+  }, [trackedAllocations]);
 
   const oldestDayKey = useMemo(() => {
-    if (!onlineAllocations.length) {
+    if (!trackedAllocations.length) {
       return null;
     }
 
-    return getRewardDayKey(onlineAllocations[0].completedAt);
-  }, [onlineAllocations]);
+    return getRewardDayKey(trackedAllocations[0].completedAt);
+  }, [trackedAllocations]);
 
   const newestDayKey = useMemo(() => {
-    if (!onlineAllocations.length) {
+    if (!trackedAllocations.length) {
       return null;
     }
 
-    return getRewardDayKey(onlineAllocations[onlineAllocations.length - 1].completedAt);
-  }, [onlineAllocations]);
+    return getRewardDayKey(trackedAllocations[trackedAllocations.length - 1].completedAt);
+  }, [trackedAllocations]);
 
   const rangeBounds = useMemo(
     () => getRangeBounds({ preset, customFrom, customTo, oldestDayKey, newestDayKey }),
@@ -745,7 +778,7 @@ export default function DailyChangesPage({ api }) {
         customLabel: getLabel(licenseId),
         backendName: currentDeviceName,
         presetTag: getPresetTag(licenseId),
-        cloneIndex: cloneIndexById[licenseId] || null,
+        tagIndex: tagIndexById[licenseId] || null,
       }) || `License ${licenseId}`,
       deviceName,
     };
@@ -757,14 +790,14 @@ export default function DailyChangesPage({ api }) {
 
   const analysis = useMemo(
     () => buildDailyChangeModel({
-      allocations: onlineAllocations,
+      allocations: trackedAllocations,
       fromDayKey: rangeBounds.fromDayKey,
       toDayKey: rangeBounds.toDayKey,
       getDisplayName,
       getOperator,
       getSnapshotForLicenseDay,
     }),
-    [onlineAllocations, rangeBounds.fromDayKey, rangeBounds.toDayKey, getOperator, getLabel, getPresetTag, cloneIndexById, licenseInfoById, deviceHistory, snapshotDays]
+    [trackedAllocations, rangeBounds.fromDayKey, rangeBounds.toDayKey, getOperator, getLabel, getPresetTag, tagIndexById, licenseInfoById, deviceHistory, snapshotDays]
   );
 
   const historyStatus = useMemo(() => getHistoryStatusMeta(historyInfo), [historyInfo]);
@@ -778,10 +811,10 @@ export default function DailyChangesPage({ api }) {
     return `${formatRewardDayLabel(rangeBounds.fromDayKey, true)} -> ${formatRewardDayLabel(rangeBounds.toDayKey, true)}`;
   }, [rangeBounds.fromDayKey, rangeBounds.toDayKey]);
 
-  const openLicenseHistory = (event, licenseId) => {
+  const openLicenseDetails = (event, licenseId) => {
     event.stopPropagation();
 
-    const detailPath = `/license-history/${encodeURIComponent(licenseId)}`;
+    const detailPath = `/licenses/${encodeURIComponent(licenseId)}`;
 
     if (event.ctrlKey || event.metaKey) {
       window.open(`${window.location.origin}${detailPath}`, '_blank', 'noopener');
@@ -795,20 +828,20 @@ export default function DailyChangesPage({ api }) {
     return <DashboardSkeleton />;
   }
 
-  if (!onlineLicenseIds.size) {
+  if (!trackedAllocations.length) {
     return (
       <div className="space-y-4 sm:space-y-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-lg sm:text-2xl font-bold text-white">Daily Changes</h1>
             <p className="text-sm text-white/45 mt-2 max-w-2xl">
-              This view explains daily reward moves for the licenses that are online right now.
+              This view explains day-over-day reward moves from the stored reward history in this browser.
             </p>
           </div>
         </div>
         <EmptyState
-          title="No online licenses in scope"
-          body="Bring at least one bound license online to generate day-over-day reward explanations here."
+          title="No stored rewards in history"
+          body="Refresh after a reward day lands to generate day-over-day explanations here."
         />
       </div>
     );
@@ -821,14 +854,14 @@ export default function DailyChangesPage({ api }) {
         <div>
           <h1 className="text-lg sm:text-2xl font-bold text-white">Daily Changes</h1>
           <p className="text-sm text-white/45 mt-2 max-w-2xl">
-            Day-over-day reward explanations for the licenses that are online right now. The reasons are grounded in payout history, license participation, and operator movement.
+            Day-over-day reward explanations across your stored reward history. The reasons are grounded in payout history, license participation, and operator movement.
           </p>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${historyStatus.className}`}>
               {historyStatus.label}
             </span>
             <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
-              {onlineLicenseIds.size} Online Licenses
+              {trackedLicenseCount} Tracked Licenses
             </span>
             {currentRangeLabel ? (
               <span className="inline-flex items-center rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/55">
@@ -871,9 +904,9 @@ export default function DailyChangesPage({ api }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
         <StatCard
           icon={Users}
-          label="Online Scope"
-          value={String(onlineLicenseIds.size)}
-          sub="Current online fleet"
+          label="Tracked Scope"
+          value={String(trackedLicenseCount)}
+          sub="Licenses in reward history"
           color="text-success"
         />
         <StatCard
@@ -899,10 +932,10 @@ export default function DailyChangesPage({ api }) {
         />
       </div>
 
-      {!onlineAllocations.length ? (
+      {!trackedAllocations.length ? (
         <EmptyState
-          title="No stored rewards for online licenses yet"
-          body="This page only explains reward movement once the current online fleet has at least one stored payout day in history."
+          title="No stored rewards yet"
+          body="This page explains reward movement once at least one stored payout day exists in history."
         />
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.9fr)_minmax(320px,1fr)] gap-4 sm:gap-6">
@@ -924,7 +957,7 @@ export default function DailyChangesPage({ api }) {
                   <div className="glass-subtle rounded-xl p-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/30">Total Rewards</p>
                     <p className="text-sm font-semibold text-white mt-1">{formatUnsignedUsd(latestComparison.totalMicros)}</p>
-                    <p className="text-[10px] text-white/35 mt-1">{latestComparison.allocationCount} allocations across {latestComparison.rewardedLicenseCount} online licenses</p>
+                    <p className="text-[10px] text-white/35 mt-1">{latestComparison.allocationCount} allocations across {latestComparison.rewardedLicenseCount} rewarded licenses</p>
                   </div>
                   <div className="glass-subtle rounded-xl p-3">
                     <p className="text-[10px] uppercase tracking-wider text-white/30">Rewarded Licenses</p>
@@ -936,10 +969,10 @@ export default function DailyChangesPage({ api }) {
                       <p className="text-[10px] uppercase tracking-wider text-white/30">Largest Single Move</p>
                       {latestComparison.topLicenseDriver ? (
                         <button
-                          onClick={(event) => openLicenseHistory(event, latestComparison.topLicenseDriver.licenseId)}
+                          onClick={(event) => openLicenseDetails(event, latestComparison.topLicenseDriver.licenseId)}
                           className="text-[10px] text-accent-light hover:text-white"
                         >
-                          History
+                          Open License
                         </button>
                       ) : null}
                     </div>
@@ -1019,10 +1052,10 @@ export default function DailyChangesPage({ api }) {
                                 {formatSignedUsd(entry.diffMicros)}
                               </span>
                               <button
-                                onClick={(event) => openLicenseHistory(event, entry.licenseId)}
+                                onClick={(event) => openLicenseDetails(event, entry.licenseId)}
                                 className="text-[10px] text-accent-light hover:text-white"
                               >
-                                View History
+                                Open License
                               </button>
                             </div>
                           </div>
@@ -1112,10 +1145,10 @@ export default function DailyChangesPage({ api }) {
                               </div>
                               <div className="flex items-center gap-3 shrink-0">
                                 <button
-                                  onClick={(event) => openLicenseHistory(event, entry.licenseId)}
+                                  onClick={(event) => openLicenseDetails(event, entry.licenseId)}
                                   className="text-[10px] text-accent-light hover:text-white"
                                 >
-                                  History
+                                  Open License
                                 </button>
                                 <span className={`text-[12px] font-semibold ${entry.diffMicros >= 0 ? 'text-success' : 'text-warning'}`}>
                                   {formatSignedUsd(entry.diffMicros)}
@@ -1153,7 +1186,7 @@ export default function DailyChangesPage({ api }) {
 
             <section className="glass p-4 sm:p-5">
               <p className="text-[10px] uppercase tracking-[0.24em] text-white/30">Most Volatile Licenses</p>
-              <p className="text-xs text-white/40 mt-2">These online licenses caused the most day-to-day movement in the current range.</p>
+              <p className="text-xs text-white/40 mt-2">These licenses caused the most day-to-day movement in the current range.</p>
               <div className="space-y-2.5 mt-4">
                 {analysis.topMovers.length ? analysis.topMovers.map((mover) => (
                   <div key={mover.licenseId} className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-3">
@@ -1161,10 +1194,10 @@ export default function DailyChangesPage({ api }) {
                       <p className="text-sm font-medium text-white truncate">{mover.name}</p>
                       <div className="flex items-center gap-3 shrink-0">
                         <button
-                          onClick={(event) => openLicenseHistory(event, mover.licenseId)}
+                          onClick={(event) => openLicenseDetails(event, mover.licenseId)}
                           className="text-[10px] text-accent-light hover:text-white"
                         >
-                          History
+                          Open License
                         </button>
                         <span className="text-[11px] font-medium text-accent-light">{formatUnsignedUsd(mover.totalSwingMicros)}</span>
                       </div>

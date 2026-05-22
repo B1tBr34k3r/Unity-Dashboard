@@ -80,7 +80,7 @@ export default function LicenseListPage({ api }) {
   const { user, allocations, licenses: licenseMetadata, summary, isLoading, manualRefresh } = api;
   const summaryData = summary?.[0] || null;
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, setPresetTag, tagPresets, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
+  const { getPresetTag, setPresetTag, tagPresets, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
   const navigate = useNavigate();
   const [search, setSearch] = usePersistentPageState('page-state:licenses:search', '');
@@ -100,9 +100,12 @@ export default function LicenseListPage({ api }) {
     () => Object.fromEntries((licenseMetadata || []).map((license) => [license.id, license])),
     [licenseMetadata]
   );
-  const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
-    [presetTags, licenseInfoById, cloneTagOrder]
+  const tagIndexById = useMemo(
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+      clone: cloneTagOrder,
+      work: workTagOrder,
+    }),
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
   );
 
   const allocationStatsById = useMemo(() => {
@@ -146,7 +149,7 @@ export default function LicenseListPage({ api }) {
       customLabel: getLabel(licenseId),
       backendName: getBackendName(licenseId),
       presetTag: getPresetTag(licenseId),
-      cloneIndex: cloneIndexById[licenseId] || null,
+      tagIndex: tagIndexById[licenseId] || null,
     });
   };
 
@@ -660,11 +663,11 @@ export default function LicenseListPage({ api }) {
                 {paginated.map((lic) => {
                   const customLabel = getLabel(lic.licenseId);
                   const presetTag = getPresetTag(lic.licenseId);
-                  const cloneIndex = cloneIndexById[lic.licenseId] || null;
+                  const tagIndex = tagIndexById[lic.licenseId] || null;
                   const displayName = getDisplayName(lic.licenseId);
                   const backendName = getBackendName(lic.licenseId);
                   const originalBackendName = getOriginalBackendName(lic.licenseId);
-                  const taggedName = formatTaggedLicenseName(backendName, presetTag, cloneIndex);
+                  const taggedName = formatTaggedLicenseName(backendName, presetTag, tagIndex);
                   const operator = getOperator(lic.licenseId);
                   const isEditing = editingId === lic.licenseId;
                   const deviceBound = hasBoundDevice(lic);
@@ -882,11 +885,11 @@ export default function LicenseListPage({ api }) {
                     {paginated.map((lic, i) => {
                       const customLabel = getLabel(lic.licenseId);
                       const presetTag = getPresetTag(lic.licenseId);
-                      const cloneIndex = cloneIndexById[lic.licenseId] || null;
+                      const tagIndex = tagIndexById[lic.licenseId] || null;
                       const displayName = getDisplayName(lic.licenseId);
                       const backendName = getBackendName(lic.licenseId);
                       const originalBackendName = getOriginalBackendName(lic.licenseId);
-                      const taggedName = formatTaggedLicenseName(backendName, presetTag, cloneIndex);
+                      const taggedName = formatTaggedLicenseName(backendName, presetTag, tagIndex);
                       const operator = getOperator(lic.licenseId);
                       const isEditing = editingId === lic.licenseId;
                       const statusKey = hasBoundDevice(lic) ? (lic.isOnline ? 'online' : 'offline') : 'unbound';

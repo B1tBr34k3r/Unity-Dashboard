@@ -35,7 +35,7 @@ export default function LicenseDetailPage({ api }) {
 
   const totalReward = logs.reduce((sum, a) => sum + a.amountMicros, 0);
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, setPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
+  const { getPresetTag, setPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
 
   // Chart data
@@ -48,9 +48,12 @@ export default function LicenseDetailPage({ api }) {
     () => Object.fromEntries((licenseMetadata || []).map((license) => [license.id, license])),
     [licenseMetadata]
   );
-  const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
-    [presetTags, licenseInfoById, cloneTagOrder]
+  const tagIndexById = useMemo(
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+      clone: cloneTagOrder,
+      work: workTagOrder,
+    }),
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
   );
 
   const licenseDetails = useMemo(
@@ -62,7 +65,7 @@ export default function LicenseDetailPage({ api }) {
   const originalIdentityName = originalBackendName && originalBackendName !== backendName ? originalBackendName : '';
   const label = getLabel(decodedId);
   const presetTag = getPresetTag(decodedId);
-  const cloneIndex = cloneIndexById[decodedId] || null;
+  const tagIndex = tagIndexById[decodedId] || null;
   const latestRewardAt = logs.length ? logs[logs.length - 1].completedAt : null;
   const latestValidationAt = licenseDetails?.validationLastSuccessAt || null;
   const latestDate = (() => {
@@ -85,8 +88,8 @@ export default function LicenseDetailPage({ api }) {
   const deviceSummary = backendName || licenseDetails?.deviceId || 'No device bound';
   const distributionLabel = formatLicenseDistribution(licenseDetails?.leaseSharePercentage);
   const leaseTimeLeft = formatLeaseTimeLeft(licenseDetails?.leaseTo);
-  const taggedName = formatTaggedLicenseName(backendName, presetTag, cloneIndex);
-  const displayName = getLicenseDisplayName({ customLabel: label, backendName, presetTag, cloneIndex });
+  const taggedName = formatTaggedLicenseName(backendName, presetTag, tagIndex);
+  const displayName = getLicenseDisplayName({ customLabel: label, backendName, presetTag, tagIndex });
   const operator = getOperator(decodedId);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');

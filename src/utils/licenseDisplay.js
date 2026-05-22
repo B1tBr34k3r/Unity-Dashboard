@@ -1,8 +1,13 @@
 export const LICENSE_TAG_PRESETS = ['Clone', 'Work', 'Secure Folder', 'Main'];
+export const NUMBERED_LICENSE_TAGS = ['clone', 'work'];
+
+const NUMBERED_LICENSE_TAG_SET = new Set(NUMBERED_LICENSE_TAGS);
 
 const DEVICE_NAME_CANONICAL_MAP = {
   prakharsa30: "Prakhar's A30",
   sma305f: "Prakhar's A30",
+  realmex: 'realme X',
+  rmx1901: 'realme X',
 };
 
 function normalizeDeviceAliasKey(name) {
@@ -16,8 +21,23 @@ function getCanonicalDeviceName(name) {
   return DEVICE_NAME_CANONICAL_MAP[normalizeDeviceAliasKey(trimmedName)] || trimmedName;
 }
 
-function normalizeCloneBucketKey(baseName) {
+function normalizePresetTagBucketKey(baseName) {
   return (baseName || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getTaggedLicenseIds(presetTags, targetTag) {
+  return Object.keys(presetTags || {}).filter((licenseId) => {
+    const presetTag = presetTags[licenseId];
+    return presetTag && presetTag.toLowerCase() === targetTag;
+  });
+}
+
+function normalizeTagOrders(tagOrder) {
+  if (Array.isArray(tagOrder)) {
+    return { clone: tagOrder };
+  }
+
+  return tagOrder && typeof tagOrder === 'object' ? tagOrder : {};
 }
 
 export function getLicenseOriginalBackendName(license) {
@@ -28,62 +48,65 @@ export function getLicenseBackendName(license) {
   return getCanonicalDeviceName(getLicenseOriginalBackendName(license));
 }
 
-export function buildCloneIndexMap(presetTags, getBackendName, cloneTagOrder = []) {
-  const cloneLicenseIds = Object.keys(presetTags || {}).filter((licenseId) => {
-    const presetTag = presetTags[licenseId];
-    return presetTag && presetTag.toLowerCase() === 'clone';
-  });
-  const cloneLicenseIdSet = new Set(cloneLicenseIds);
-  const orderedCloneIds = [];
-  const seen = new Set();
+export function buildCloneIndexMap(presetTags, getBackendName, tagOrder = []) {
+  const normalizedTagOrders = normalizeTagOrders(tagOrder);
 
-  cloneTagOrder.forEach((licenseId) => {
-    if (!cloneLicenseIdSet.has(licenseId) || seen.has(licenseId)) {
-      return;
-    }
+  return NUMBERED_LICENSE_TAGS.reduce((tagIndexesById, targetTag) => {
+    const taggedLicenseIds = getTaggedLicenseIds(presetTags, targetTag);
+    const taggedLicenseIdSet = new Set(taggedLicenseIds);
+    const orderedTaggedIds = [];
+    const seen = new Set();
+    const targetTagOrder = Array.isArray(normalizedTagOrders[targetTag]) ? normalizedTagOrders[targetTag] : [];
 
-    seen.add(licenseId);
-    orderedCloneIds.push(licenseId);
-  });
-
-  const fallbackCloneIds = cloneLicenseIds
-    .filter((licenseId) => !seen.has(licenseId))
-    .sort((leftId, rightId) => {
-      const leftBucketKey = normalizeCloneBucketKey(getBackendName(leftId)) || `__clone__:${leftId}`;
-      const rightBucketKey = normalizeCloneBucketKey(getBackendName(rightId)) || `__clone__:${rightId}`;
-      const bucketComparison = leftBucketKey.localeCompare(rightBucketKey, undefined, {
-        sensitivity: 'base',
-        numeric: true,
-      });
-
-      if (bucketComparison !== 0) {
-        return bucketComparison;
+    targetTagOrder.forEach((licenseId) => {
+      if (!taggedLicenseIdSet.has(licenseId) || seen.has(licenseId)) {
+        return;
       }
 
-      return leftId.localeCompare(rightId, undefined, {
-        sensitivity: 'base',
-        numeric: true,
-      });
+      seen.add(licenseId);
+      orderedTaggedIds.push(licenseId);
     });
 
-  const countsByBucketKey = new Map();
+    const fallbackTaggedIds = taggedLicenseIds
+      .filter((licenseId) => !seen.has(licenseId))
+      .sort((leftId, rightId) => {
+        const leftBucketKey = normalizePresetTagBucketKey(getBackendName(leftId)) || `__${targetTag}__:${leftId}`;
+        const rightBucketKey = normalizePresetTagBucketKey(getBackendName(rightId)) || `__${targetTag}__:${rightId}`;
+        const bucketComparison = leftBucketKey.localeCompare(rightBucketKey, undefined, {
+          sensitivity: 'base',
+          numeric: true,
+        });
 
-  return [...orderedCloneIds, ...fallbackCloneIds].reduce((cloneIndexesById, licenseId) => {
-    const bucketKey = normalizeCloneBucketKey(getBackendName(licenseId)) || `__clone__:${licenseId}`;
-    const nextIndex = (countsByBucketKey.get(bucketKey) || 0) + 1;
+        if (bucketComparison !== 0) {
+          return bucketComparison;
+        }
 
-    countsByBucketKey.set(bucketKey, nextIndex);
-    cloneIndexesById[licenseId] = nextIndex;
-    return cloneIndexesById;
+        return leftId.localeCompare(rightId, undefined, {
+          sensitivity: 'base',
+          numeric: true,
+        });
+      });
+
+    const countsByBucketKey = new Map();
+
+    [...orderedTaggedIds, ...fallbackTaggedIds].forEach((licenseId) => {
+      const bucketKey = normalizePresetTagBucketKey(getBackendName(licenseId)) || `__${targetTag}__:${licenseId}`;
+      const nextIndex = (countsByBucketKey.get(bucketKey) || 0) + 1;
+
+      countsByBucketKey.set(bucketKey, nextIndex);
+      tagIndexesById[licenseId] = nextIndex;
+    });
+
+    return tagIndexesById;
   }, {});
 }
 
-export function formatTaggedLicenseName(baseName, presetTag, cloneIndex = null) {
+export function formatTaggedLicenseName(baseName, presetTag, tagIndex = null) {
   const trimmedBaseName = baseName ? baseName.trim() : '';
   const trimmedPresetTag = presetTag ? presetTag.trim() : '';
   const numberedPresetTag =
-    trimmedPresetTag.toLowerCase() === 'clone' && typeof cloneIndex === 'number' && cloneIndex > 0
-      ? `${trimmedPresetTag} ${cloneIndex}`
+    NUMBERED_LICENSE_TAG_SET.has(trimmedPresetTag.toLowerCase()) && typeof tagIndex === 'number' && tagIndex > 0
+      ? `${trimmedPresetTag} ${tagIndex}`
       : trimmedPresetTag;
 
   if (!trimmedPresetTag) return trimmedBaseName;
@@ -92,11 +115,11 @@ export function formatTaggedLicenseName(baseName, presetTag, cloneIndex = null) 
   return `${trimmedBaseName} ${numberedPresetTag}`;
 }
 
-export function getLicenseDisplayName({ customLabel, backendName, presetTag, cloneIndex }) {
+export function getLicenseDisplayName({ customLabel, backendName, presetTag, tagIndex = null, cloneIndex = null }) {
   const trimmedLabel = customLabel ? customLabel.trim() : '';
   if (trimmedLabel) return trimmedLabel;
 
-  return formatTaggedLicenseName(backendName, presetTag, cloneIndex);
+  return formatTaggedLicenseName(backendName, presetTag, tagIndex ?? cloneIndex);
 }
 
 export function getLicenseDistribution(leaseSharePercentage) {

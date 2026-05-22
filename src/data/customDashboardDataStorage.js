@@ -5,6 +5,7 @@ const LEGACY_LICENSES_KEY = 'unity_nodes_licenses';
 const OPERATORS_STORAGE_KEY = 'unity_license_operators';
 const PRESET_TAGS_STORAGE_KEY = 'unity_license_preset_tags';
 const CLONE_TAG_ORDER_STORAGE_KEY = 'unity_license_clone_tag_order';
+const WORK_TAG_ORDER_STORAGE_KEY = 'unity_license_work_tag_order';
 const DEVICE_HISTORY_STORAGE_KEY = 'unity_license_device_history';
 const MAX_DEVICE_LINK_PERIODS = 8;
 const DEVICE_LINK_NOISE_WINDOW_MS = 10 * 60 * 1000;
@@ -206,26 +207,28 @@ export function normalizePresetTags(rawValue) {
   }, {});
 }
 
-function getCloneTaggedLicenseIds(presetTags) {
-  return Object.entries(presetTags || {}).reduce((cloneIds, [licenseId, tag]) => {
-    if (tag && tag.toLowerCase() === 'clone') {
-      cloneIds.push(licenseId);
+function getPresetTaggedLicenseIds(presetTags, targetTag) {
+  const normalizedTargetTag = typeof targetTag === 'string' ? targetTag.toLowerCase() : '';
+
+  return Object.entries(presetTags || {}).reduce((taggedIds, [licenseId, tag]) => {
+    if (tag && tag.toLowerCase() === normalizedTargetTag) {
+      taggedIds.push(licenseId);
     }
 
-    return cloneIds;
+    return taggedIds;
   }, []);
 }
 
-export function normalizeCloneTagOrder(rawValue, presetTags) {
-  const cloneLicenseIds = getCloneTaggedLicenseIds(presetTags);
-  const validCloneIds = new Set(cloneLicenseIds);
+function normalizePresetTagOrder(rawValue, presetTags, targetTag) {
+  const taggedLicenseIds = getPresetTaggedLicenseIds(presetTags, targetTag);
+  const validTaggedIds = new Set(taggedLicenseIds);
   const normalizedOrder = [];
   const seen = new Set();
 
   const addLicenseId = (licenseId) => {
     const normalizedId = typeof licenseId === 'string' ? licenseId.trim() : String(licenseId || '').trim();
 
-    if (!normalizedId || seen.has(normalizedId) || !validCloneIds.has(normalizedId)) {
+    if (!normalizedId || seen.has(normalizedId) || !validTaggedIds.has(normalizedId)) {
       return;
     }
 
@@ -237,9 +240,17 @@ export function normalizeCloneTagOrder(rawValue, presetTags) {
     rawValue.forEach(addLicenseId);
   }
 
-  cloneLicenseIds.forEach(addLicenseId);
+  taggedLicenseIds.forEach(addLicenseId);
 
   return normalizedOrder;
+}
+
+export function normalizeCloneTagOrder(rawValue, presetTags) {
+  return normalizePresetTagOrder(rawValue, presetTags, 'clone');
+}
+
+export function normalizeWorkTagOrder(rawValue, presetTags) {
+  return normalizePresetTagOrder(rawValue, presetTags, 'work');
 }
 
 export function writePresetTags(userId, presetTags) {
@@ -277,42 +288,62 @@ export function clearPresetTags(userId) {
   removeStorageKey(getScopedStorageKey(PRESET_TAGS_STORAGE_KEY, userId));
 }
 
-export function writeCloneTagOrder(userId, cloneTagOrder, presetTags) {
+function writePresetTagOrder(userId, tagOrder, presetTags, storageKey, normalizeTagOrder) {
   writeJsonStorage(
-    getScopedStorageKey(CLONE_TAG_ORDER_STORAGE_KEY, userId),
-    normalizeCloneTagOrder(cloneTagOrder, presetTags)
+    getScopedStorageKey(storageKey, userId),
+    normalizeTagOrder(tagOrder, presetTags)
   );
 }
 
-export function readCloneTagOrder(userId, presetTags) {
-  const fallbackOrder = normalizeCloneTagOrder([], presetTags);
+function readPresetTagOrder(userId, presetTags, storageKey, normalizeTagOrder) {
+  const fallbackOrder = normalizeTagOrder([], presetTags);
 
   if (!userId) {
     return fallbackOrder;
   }
 
-  const scopedKey = getScopedStorageKey(CLONE_TAG_ORDER_STORAGE_KEY, userId);
+  const scopedKey = getScopedStorageKey(storageKey, userId);
   const scopedValue = readJsonStorage(scopedKey);
 
   if (scopedValue) {
-    return normalizeCloneTagOrder(scopedValue, presetTags);
+    return normalizeTagOrder(scopedValue, presetTags);
   }
 
-  const legacyValue = readJsonStorage(CLONE_TAG_ORDER_STORAGE_KEY);
+  const legacyValue = readJsonStorage(storageKey);
 
   if (legacyValue) {
-    const migrated = normalizeCloneTagOrder(legacyValue, presetTags);
+    const migrated = normalizeTagOrder(legacyValue, presetTags);
 
-    writeCloneTagOrder(userId, migrated, presetTags);
-    removeStorageKey(CLONE_TAG_ORDER_STORAGE_KEY);
+    writePresetTagOrder(userId, migrated, presetTags, storageKey, normalizeTagOrder);
+    removeStorageKey(storageKey);
     return migrated;
   }
 
   return fallbackOrder;
 }
 
+export function writeCloneTagOrder(userId, cloneTagOrder, presetTags) {
+  writePresetTagOrder(userId, cloneTagOrder, presetTags, CLONE_TAG_ORDER_STORAGE_KEY, normalizeCloneTagOrder);
+}
+
+export function readCloneTagOrder(userId, presetTags) {
+  return readPresetTagOrder(userId, presetTags, CLONE_TAG_ORDER_STORAGE_KEY, normalizeCloneTagOrder);
+}
+
 export function clearCloneTagOrder(userId) {
   removeStorageKey(getScopedStorageKey(CLONE_TAG_ORDER_STORAGE_KEY, userId));
+}
+
+export function writeWorkTagOrder(userId, workTagOrder, presetTags) {
+  writePresetTagOrder(userId, workTagOrder, presetTags, WORK_TAG_ORDER_STORAGE_KEY, normalizeWorkTagOrder);
+}
+
+export function readWorkTagOrder(userId, presetTags) {
+  return readPresetTagOrder(userId, presetTags, WORK_TAG_ORDER_STORAGE_KEY, normalizeWorkTagOrder);
+}
+
+export function clearWorkTagOrder(userId) {
+  removeStorageKey(getScopedStorageKey(WORK_TAG_ORDER_STORAGE_KEY, userId));
 }
 
 function normalizeTimestamp(value) {

@@ -1,12 +1,11 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar, History } from 'lucide-react';
+import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar } from 'lucide-react';
 import { useState } from 'react';
 
 const primaryLinks = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/licenses', icon: List, label: 'Licenses' },
-  { to: '/license-history', icon: History, label: 'License History' },
   { to: '/payouts', icon: Wallet, label: 'Payout Wallets' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];

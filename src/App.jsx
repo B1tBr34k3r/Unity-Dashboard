@@ -10,8 +10,6 @@ import { useNavigate } from 'react-router-dom';
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DailyChangesPage = lazy(() => import('./pages/DailyChangesPage'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
-const LicenseHistoryPage = lazy(() => import('./pages/LicenseHistoryPage'));
-const LicenseHistoryDetailPage = lazy(() => import('./pages/LicenseHistoryDetailPage'));
 const LicenseListPage = lazy(() => import('./pages/LicenseListPage'));
 const LicenseDetailPage = lazy(() => import('./pages/LicenseDetailPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -52,8 +50,6 @@ export default function App() {
                 <Route path="/" element={<DashboardPage api={api} />} />
                 <Route path="/daily-changes" element={<DailyChangesPage api={api} />} />
                 <Route path="/analytics" element={<AnalyticsPage api={api} />} />
-                <Route path="/license-history" element={<Suspense fallback={<LicenseListSkeleton />}><LicenseHistoryPage api={api} /></Suspense>} />
-                <Route path="/license-history/:id" element={<Suspense fallback={<LicenseDetailSkeleton />}><LicenseHistoryDetailPage api={api} /></Suspense>} />
                 <Route path="/licenses" element={<Suspense fallback={<LicenseListSkeleton />}><LicenseListPage api={api} /></Suspense>} />
                 <Route path="/licenses/:id" element={<Suspense fallback={<LicenseDetailSkeleton />}><LicenseDetailPage api={api} /></Suspense>} />
                 <Route path="/payouts" element={<PayoutWalletsPage />} />

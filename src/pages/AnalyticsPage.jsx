@@ -258,7 +258,7 @@ function getStatusBucket(license) {
 export default function AnalyticsPage({ api }) {
   const { user, balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, manualRefresh } = api;
   const { getLabel } = useLicenseLabels(user?.id);
-  const { getPresetTag, presetTags, cloneTagOrder } = useLicensePresetTags(user?.id);
+  const { getPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator } = useOperatorTags(user?.id);
   const dateRange = useDateRangeFilter(allocations || [], (item) => item.completedAt, 'page-state:analytics');
   const filteredAllocations = dateRange.filtered || [];
@@ -325,9 +325,12 @@ export default function AnalyticsPage({ api }) {
     [licenseMetadata]
   );
 
-  const cloneIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), cloneTagOrder),
-    [presetTags, licenseInfoById, cloneTagOrder]
+  const tagIndexById = useMemo(
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+      clone: cloneTagOrder,
+      work: workTagOrder,
+    }),
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
   );
 
   const allocationStatsById = useMemo(() => {
@@ -356,7 +359,7 @@ export default function AnalyticsPage({ api }) {
       const stats = allocationStatsById[license.id] || { totalMicros: 0, entries: 0, latestRewardAt: null };
       const backendName = getLicenseBackendName(license);
       const presetTag = getPresetTag(license.id);
-      const cloneIndex = cloneIndexById[license.id] || null;
+      const tagIndex = tagIndexById[license.id] || null;
       const { bucket, uptimePercentage, minUptime, hasBoundDevice } = getStatusBucket(license);
       const normalizedSharePercentage =
         typeof license.leaseSharePercentage === 'number'
@@ -371,7 +374,7 @@ export default function AnalyticsPage({ api }) {
             customLabel: getLabel(license.id),
             backendName,
             presetTag,
-            cloneIndex,
+            tagIndex,
           }) || truncateHex(license.id),
         backendName,
         presetTag: presetTag || 'Untagged',
@@ -410,7 +413,7 @@ export default function AnalyticsPage({ api }) {
     });
 
     return merged;
-  }, [licenseMetadata, allocationStatsById, getLabel, getOperator, getPresetTag, cloneIndexById]);
+  }, [licenseMetadata, allocationStatsById, getLabel, getOperator, getPresetTag, tagIndexById]);
 
   const filteredRewardTotalMicros = useMemo(
     () => filteredAllocations.reduce((sum, allocation) => sum + allocation.amountMicros, 0),
