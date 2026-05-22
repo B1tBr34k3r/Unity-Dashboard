@@ -5,6 +5,7 @@ import DateRangeFilter from '../components/common/DateRangeFilter';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import StatCard from '../components/dashboard/StatCard';
 import { getLicenseSnapshotStatus } from '../data/licenseSnapshotHistory';
+import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseDeviceHistory } from '../hooks/useLicenseDeviceHistory';
 import { useLicenseSnapshotHistory } from '../hooks/useLicenseSnapshotHistory';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
@@ -711,6 +712,7 @@ function EmptyState({ title, body }) {
 
 export default function DailyChangesPage({ api }) {
   const { user, licenses, allocations, historyInfo, isLoading, error, manualRefresh } = api;
+  const { deviceAliasLookup } = useDeviceCombinations(user?.id);
   const { deviceHistory } = useLicenseDeviceHistory(user?.id, licenses);
   const { days: snapshotDays, meta: snapshotMeta } = useLicenseSnapshotHistory(user?.id, licenses);
   const { getLabel } = useLicenseLabels(user?.id);
@@ -727,11 +729,11 @@ export default function DailyChangesPage({ api }) {
   );
 
   const tagIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup), {
       clone: cloneTagOrder,
       work: workTagOrder,
     }),
-    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder, deviceAliasLookup]
   );
 
   const trackedAllocations = useMemo(() => (Array.isArray(allocations) ? allocations : []), [allocations]);
@@ -766,7 +768,7 @@ export default function DailyChangesPage({ api }) {
     const historyRecord = deviceHistory[licenseId];
     const deviceLink = getDeviceLinkForDay(historyRecord, dayKey);
     const lastKnownLink = historyRecord?.links?.[historyRecord.links.length - 1] || null;
-    const currentDeviceName = getLicenseBackendName(license);
+    const currentDeviceName = getLicenseBackendName(license, deviceAliasLookup);
     const currentDeviceId = typeof license?.deviceId === 'string' ? license.deviceId.trim() : String(license?.deviceId || '').trim();
     const deviceName = formatDeviceName(
       deviceLink?.deviceName || currentDeviceName || lastKnownLink?.deviceName || '',
@@ -797,7 +799,7 @@ export default function DailyChangesPage({ api }) {
       getOperator,
       getSnapshotForLicenseDay,
     }),
-    [trackedAllocations, rangeBounds.fromDayKey, rangeBounds.toDayKey, getOperator, getLabel, getPresetTag, tagIndexById, licenseInfoById, deviceHistory, snapshotDays]
+    [trackedAllocations, rangeBounds.fromDayKey, rangeBounds.toDayKey, getOperator, getLabel, getPresetTag, tagIndexById, licenseInfoById, deviceHistory, snapshotDays, deviceAliasLookup]
   );
 
   const historyStatus = useMemo(() => getHistoryStatusMeta(historyInfo), [historyInfo]);

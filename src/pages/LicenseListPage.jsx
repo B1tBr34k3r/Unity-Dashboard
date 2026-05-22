@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Pagination from '../components/licenses/Pagination';
 import LicenseTagPicker from '../components/licenses/LicenseTagPicker';
 import LicenseStatusBadge from '../components/licenses/LicenseStatusBadge';
+import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
@@ -79,6 +80,7 @@ function isBelowMinUptime(license) {
 export default function LicenseListPage({ api }) {
   const { user, allocations, licenses: licenseMetadata, summary, isLoading, manualRefresh } = api;
   const summaryData = summary?.[0] || null;
+  const { deviceAliasLookup } = useDeviceCombinations(user?.id);
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
   const { getPresetTag, setPresetTag, tagPresets, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
@@ -101,11 +103,11 @@ export default function LicenseListPage({ api }) {
     [licenseMetadata]
   );
   const tagIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup), {
       clone: cloneTagOrder,
       work: workTagOrder,
     }),
-    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder, deviceAliasLookup]
   );
 
   const allocationStatsById = useMemo(() => {
@@ -134,7 +136,7 @@ export default function LicenseListPage({ api }) {
   }, [allocations]);
 
   const getBackendName = (licenseId) => {
-    return getLicenseBackendName(licenseInfoById[licenseId]);
+    return getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup);
   };
 
   const getOriginalBackendName = (licenseId) => {

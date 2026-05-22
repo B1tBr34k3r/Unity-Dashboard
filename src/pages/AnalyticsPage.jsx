@@ -27,6 +27,7 @@ import { RefreshCw, Wallet, TrendingUp, Clock, Users } from 'lucide-react';
 import StatCard from '../components/dashboard/StatCard';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
+import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
@@ -257,6 +258,7 @@ function getStatusBucket(license) {
 
 export default function AnalyticsPage({ api }) {
   const { user, balance, licenses: licenseMetadata, allocations, historyInfo, isLoading, error, manualRefresh } = api;
+  const { deviceAliasLookup } = useDeviceCombinations(user?.id);
   const { getLabel } = useLicenseLabels(user?.id);
   const { getPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator } = useOperatorTags(user?.id);
@@ -326,11 +328,11 @@ export default function AnalyticsPage({ api }) {
   );
 
   const tagIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup), {
       clone: cloneTagOrder,
       work: workTagOrder,
     }),
-    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder, deviceAliasLookup]
   );
 
   const allocationStatsById = useMemo(() => {
@@ -357,7 +359,7 @@ export default function AnalyticsPage({ api }) {
     const merged = (licenseMetadata || []).map((license) => {
       seen.add(license.id);
       const stats = allocationStatsById[license.id] || { totalMicros: 0, entries: 0, latestRewardAt: null };
-      const backendName = getLicenseBackendName(license);
+      const backendName = getLicenseBackendName(license, deviceAliasLookup);
       const presetTag = getPresetTag(license.id);
       const tagIndex = tagIndexById[license.id] || null;
       const { bucket, uptimePercentage, minUptime, hasBoundDevice } = getStatusBucket(license);
@@ -413,7 +415,7 @@ export default function AnalyticsPage({ api }) {
     });
 
     return merged;
-  }, [licenseMetadata, allocationStatsById, getLabel, getOperator, getPresetTag, tagIndexById]);
+  }, [licenseMetadata, allocationStatsById, getLabel, getOperator, getPresetTag, tagIndexById, deviceAliasLookup]);
 
   const filteredRewardTotalMicros = useMemo(
     () => filteredAllocations.reduce((sum, allocation) => sum + allocation.amountMicros, 0),
@@ -1026,7 +1028,7 @@ export default function AnalyticsPage({ api }) {
         <ChartCard
           eyebrow="Device Leaders"
           title="Top devices by rewards"
-          description="Groups licenses by backend device name and ranks them by selected-range earnings."
+          description="Groups licenses by the combined device identity and ranks them by selected-range earnings."
           className="xl:col-span-3"
           footer={topDeviceRewards.length ? `${topDeviceRewards[0].name} is the strongest device family in the current range.` : 'No device reward data in this range.'}
         >

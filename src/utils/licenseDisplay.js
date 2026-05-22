@@ -1,24 +1,87 @@
 export const LICENSE_TAG_PRESETS = ['Clone', 'Work', 'Secure Folder', 'Main'];
 export const NUMBERED_LICENSE_TAGS = ['clone', 'work'];
+export const DEFAULT_DEVICE_COMBINATIONS = [
+  {
+    label: "Prakhar's A30",
+    aliases: ["Prakhar's A30", 'SM-A305F'],
+  },
+  {
+    label: 'realme X',
+    aliases: ['realme X', 'RMX1901'],
+  },
+];
 
 const NUMBERED_LICENSE_TAG_SET = new Set(NUMBERED_LICENSE_TAGS);
 
-const DEVICE_NAME_CANONICAL_MAP = {
-  prakharsa30: "Prakhar's A30",
-  sma305f: "Prakhar's A30",
-  realmex: 'realme X',
-  rmx1901: 'realme X',
-};
-
-function normalizeDeviceAliasKey(name) {
+export function normalizeDeviceAliasKey(name) {
   return (name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-function getCanonicalDeviceName(name) {
+function applyDeviceCombination(lookup, combination, overwrite = false) {
+  if (!combination || typeof combination !== 'object' || Array.isArray(combination)) {
+    return;
+  }
+
+  const label = typeof combination.label === 'string' ? combination.label.trim() : '';
+  const aliases = Array.isArray(combination.aliases) ? combination.aliases : [];
+
+  if (!label) {
+    return;
+  }
+
+  const aliasNames = [label, ...aliases];
+
+  aliasNames.forEach((aliasName) => {
+    const alias = typeof aliasName === 'string' ? aliasName.trim() : '';
+    const aliasKey = normalizeDeviceAliasKey(alias);
+
+    if (!alias || !aliasKey) {
+      return;
+    }
+
+    if (!overwrite && lookup[aliasKey]) {
+      return;
+    }
+
+    lookup[aliasKey] = label;
+  });
+}
+
+const DEFAULT_DEVICE_ALIAS_LOOKUP = (() => {
+  const lookup = {};
+
+  DEFAULT_DEVICE_COMBINATIONS.forEach((combination) => {
+    applyDeviceCombination(lookup, combination, true);
+  });
+
+  return lookup;
+})();
+
+export function buildDeviceAliasLookup(deviceCombinations = []) {
+  if (!Array.isArray(deviceCombinations) || !deviceCombinations.length) {
+    return DEFAULT_DEVICE_ALIAS_LOOKUP;
+  }
+
+  const lookup = { ...DEFAULT_DEVICE_ALIAS_LOOKUP };
+
+  deviceCombinations.forEach((combination) => {
+    applyDeviceCombination(lookup, combination, true);
+  });
+
+  return lookup;
+}
+
+export function getCanonicalDeviceName(name, deviceAliasLookup = null) {
   const trimmedName = name ? name.trim() : '';
   if (!trimmedName) return '';
 
-  return DEVICE_NAME_CANONICAL_MAP[normalizeDeviceAliasKey(trimmedName)] || trimmedName;
+  const aliasKey = normalizeDeviceAliasKey(trimmedName);
+
+  if (deviceAliasLookup?.[aliasKey]) {
+    return deviceAliasLookup[aliasKey];
+  }
+
+  return DEFAULT_DEVICE_ALIAS_LOOKUP[aliasKey] || trimmedName;
 }
 
 function normalizePresetTagBucketKey(baseName) {
@@ -44,8 +107,8 @@ export function getLicenseOriginalBackendName(license) {
   return license?.alias?.trim() || license?.deviceName?.trim() || '';
 }
 
-export function getLicenseBackendName(license) {
-  return getCanonicalDeviceName(getLicenseOriginalBackendName(license));
+export function getLicenseBackendName(license, deviceAliasLookup = null) {
+  return getCanonicalDeviceName(getLicenseOriginalBackendName(license), deviceAliasLookup);
 }
 
 export function buildCloneIndexMap(presetTags, getBackendName, tagOrder = []) {

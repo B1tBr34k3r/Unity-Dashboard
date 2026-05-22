@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { ArrowLeft, Copy, Pencil, Check, X } from 'lucide-react';
 import HoverRevealText from '../components/common/HoverRevealText';
+import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { useOperatorTags } from '../hooks/useOperatorTags';
@@ -34,6 +35,7 @@ export default function LicenseDetailPage({ api }) {
   const hasRewardData = allLogs.length > 0;
 
   const totalReward = logs.reduce((sum, a) => sum + a.amountMicros, 0);
+  const { deviceAliasLookup } = useDeviceCombinations(user?.id);
   const { getLabel, setLabel } = useLicenseLabels(user?.id);
   const { getPresetTag, setPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
@@ -49,18 +51,18 @@ export default function LicenseDetailPage({ api }) {
     [licenseMetadata]
   );
   const tagIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup), {
       clone: cloneTagOrder,
       work: workTagOrder,
     }),
-    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder, deviceAliasLookup]
   );
 
   const licenseDetails = useMemo(
     () => (licenseMetadata || []).find((license) => license.id === decodedId) || null,
     [licenseMetadata, decodedId]
   );
-  const backendName = getLicenseBackendName(licenseDetails);
+  const backendName = getLicenseBackendName(licenseDetails, deviceAliasLookup);
   const originalBackendName = getLicenseOriginalBackendName(licenseDetails);
   const originalIdentityName = originalBackendName && originalBackendName !== backendName ? originalBackendName : '';
   const label = getLabel(decodedId);

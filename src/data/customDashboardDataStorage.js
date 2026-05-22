@@ -1,8 +1,9 @@
-import { LICENSE_TAG_PRESETS, getLicenseBackendName } from '../utils/licenseDisplay';
+import { LICENSE_TAG_PRESETS, getLicenseBackendName, normalizeDeviceAliasKey } from '../utils/licenseDisplay';
 
 const LABELS_STORAGE_KEY = 'unity_license_labels';
 const LEGACY_LICENSES_KEY = 'unity_nodes_licenses';
 const OPERATORS_STORAGE_KEY = 'unity_license_operators';
+const DEVICE_COMBINATIONS_STORAGE_KEY = 'unity_device_combinations';
 const PRESET_TAGS_STORAGE_KEY = 'unity_license_preset_tags';
 const CLONE_TAG_ORDER_STORAGE_KEY = 'unity_license_clone_tag_order';
 const WORK_TAG_ORDER_STORAGE_KEY = 'unity_license_work_tag_order';
@@ -177,6 +178,119 @@ export function readOperators(userId) {
 
 export function clearOperators(userId) {
   removeStorageKey(getScopedStorageKey(OPERATORS_STORAGE_KEY, userId));
+}
+
+function normalizeDeviceCombinationName(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return String(value).trim();
+}
+
+function normalizeDeviceCombinationEntry(rawValue) {
+  if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue)) {
+    return null;
+  }
+
+  const label = normalizeDeviceCombinationName(rawValue.label || rawValue.name || rawValue.canonicalName);
+  const aliasSource = Array.isArray(rawValue.aliases)
+    ? rawValue.aliases
+    : Array.isArray(rawValue.deviceNames)
+      ? rawValue.deviceNames
+      : Array.isArray(rawValue.devices)
+        ? rawValue.devices
+        : [];
+
+  if (!label) {
+    return null;
+  }
+
+  const aliases = [];
+  const seen = new Set();
+
+  const addAlias = (value) => {
+    const alias = normalizeDeviceCombinationName(value);
+    const aliasKey = normalizeDeviceAliasKey(alias);
+
+    if (!alias || !aliasKey || seen.has(aliasKey)) {
+      return;
+    }
+
+    seen.add(aliasKey);
+    aliases.push(alias);
+  };
+
+  addAlias(label);
+  aliasSource.forEach(addAlias);
+
+  if (aliases.length < 2) {
+    return null;
+  }
+
+  return { label, aliases };
+}
+
+export function normalizeDeviceCombinations(rawValue) {
+  if (!Array.isArray(rawValue)) {
+    return [];
+  }
+
+  const normalized = [];
+  const usedAliasKeys = new Set();
+
+  rawValue.forEach((entry) => {
+    const normalizedEntry = normalizeDeviceCombinationEntry(entry);
+
+    if (!normalizedEntry) {
+      return;
+    }
+
+    const aliases = [];
+
+    normalizedEntry.aliases.forEach((alias) => {
+      const aliasKey = normalizeDeviceAliasKey(alias);
+
+      if (!aliasKey || usedAliasKeys.has(aliasKey)) {
+        return;
+      }
+
+      usedAliasKeys.add(aliasKey);
+      aliases.push(alias);
+    });
+
+    if (aliases.length < 2 || normalizeDeviceAliasKey(normalizedEntry.label) !== normalizeDeviceAliasKey(aliases[0])) {
+      return;
+    }
+
+    normalized.push({
+      label: normalizedEntry.label,
+      aliases,
+    });
+  });
+
+  return normalized;
+}
+
+export function writeDeviceCombinations(userId, deviceCombinations) {
+  writeJsonStorage(getScopedStorageKey(DEVICE_COMBINATIONS_STORAGE_KEY, userId), normalizeDeviceCombinations(deviceCombinations));
+}
+
+export function readDeviceCombinations(userId) {
+  if (!userId) {
+    return [];
+  }
+
+  const scopedValue = readJsonStorage(getScopedStorageKey(DEVICE_COMBINATIONS_STORAGE_KEY, userId));
+  return normalizeDeviceCombinations(scopedValue);
+}
+
+export function clearDeviceCombinations(userId) {
+  removeStorageKey(getScopedStorageKey(DEVICE_COMBINATIONS_STORAGE_KEY, userId));
 }
 
 export function normalizePresetTag(tag) {

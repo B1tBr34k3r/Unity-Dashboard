@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import StatCard from '../components/dashboard/StatCard';
 import MonthlyRewardsChart from '../components/dashboard/MonthlyRewardsChart';
 import OperatorBadge from '../components/licenses/OperatorBadge';
+import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useOperatorTags } from '../hooks/useOperatorTags';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
@@ -96,6 +97,7 @@ function buildDailyInsight(allocations, getDisplayName) {
 export default function DashboardPage({ api }) {
   const { user, balance, allocations, licenses, summary, historyInfo, isLoading, error, manualRefresh } = api;
   const summaryData = summary?.[0] || null;
+  const { deviceAliasLookup } = useDeviceCombinations(user?.id);
   const { getOperator, allOperators } = useOperatorTags(user?.id);
   const { getLabel } = useLicenseLabels(user?.id);
   const { getPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
@@ -106,23 +108,23 @@ export default function DashboardPage({ api }) {
     [licenses]
   );
   const tagIndexById = useMemo(
-    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId]), {
+    () => buildCloneIndexMap(presetTags, (licenseId) => getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup), {
       clone: cloneTagOrder,
       work: workTagOrder,
     }),
-    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder]
+    [presetTags, licenseInfoById, cloneTagOrder, workTagOrder, deviceAliasLookup]
   );
 
   const getDisplayName = (licenseId) => getLicenseDisplayName({
     customLabel: getLabel(licenseId),
-    backendName: getLicenseBackendName(licenseInfoById[licenseId]),
+    backendName: getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup),
     presetTag: getPresetTag(licenseId),
     tagIndex: tagIndexById[licenseId] || null,
   }) || `License ${licenseId}`;
 
   const dailyInsight = useMemo(
     () => buildDailyInsight(allocations, getDisplayName),
-    [allocations, getLabel, getPresetTag, tagIndexById, licenseInfoById]
+    [allocations, getLabel, getPresetTag, tagIndexById, licenseInfoById, deviceAliasLookup]
   );
 
   const monthData = useMemo(() => {
