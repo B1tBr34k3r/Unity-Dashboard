@@ -11,10 +11,14 @@ import LicenseStatusBadge from '../components/licenses/LicenseStatusBadge';
 import OperatorPicker from '../components/licenses/OperatorPicker';
 import { aggregateByRewardMonth, formatDateShort, formatRewardDayLabel, microsDetailed, truncateHex } from '../utils/formatters';
 import { buildCloneIndexMap, formatLeaseTimeLeft, formatLicenseDistribution, formatTaggedLicenseName, getLicenseBackendName, getLicenseDisplayName, getLicenseOriginalBackendName } from '../utils/licenseDisplay';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, Brush, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import toast from 'react-hot-toast';
 import { LicenseDetailSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
+
+const DAILY_REWARD_DEFAULT_WINDOW = 45;
+const DAILY_REWARD_MIN_WIDTH = 720;
+const DAILY_REWARD_BAR_WIDTH = 24;
 
 export default function LicenseDetailPage({ api }) {
   const { id } = useParams();
@@ -40,11 +44,23 @@ export default function LicenseDetailPage({ api }) {
   const { getPresetTag, setPresetTag, presetTags, cloneTagOrder, workTagOrder } = useLicensePresetTags(user?.id);
   const { getOperator, setOperator, allOperators } = useOperatorTags(user?.id);
 
-  // Chart data
-  const chartData = logs.map((a) => ({
+  const chartData = useMemo(() => logs.map((a) => ({
     date: formatRewardDayLabel(a.completedAt),
     reward: Number((a.amountMicros / 1_000_000).toFixed(4)),
-  }));
+  })), [logs]);
+
+  const dailyRewardBrushStartIndex = useMemo(() => {
+    if (!chartData.length) {
+      return 0;
+    }
+
+    return Math.max(0, chartData.length - DAILY_REWARD_DEFAULT_WINDOW);
+  }, [chartData]);
+
+  const dailyRewardChartMinWidth = useMemo(
+    () => Math.max(DAILY_REWARD_MIN_WIDTH, chartData.length * DAILY_REWARD_BAR_WIDTH),
+    [chartData]
+  );
 
   const licenseInfoById = useMemo(
     () => Object.fromEntries((licenseMetadata || []).map((license) => [license.id, license])),
@@ -306,27 +322,56 @@ export default function LicenseDetailPage({ api }) {
       {/* Reward chart — full width */}
       {chartData.length > 1 && (
         <div className="glass p-4 sm:p-6 mb-4">
-          <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-4">Daily Rewards</h2>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={chartData}>
-              <defs>
-                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#818cf8" stopOpacity={0.9} />
-                  <stop offset="100%" stopColor="#6366f1" stopOpacity={0.6} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} stroke="rgba(255,255,255,0.06)" />
-              <YAxis tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)' }} stroke="rgba(255,255,255,0.06)" />
-              <Tooltip
-                cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-                contentStyle={{ background: 'rgba(10,10,26,0.9)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', fontSize: '13px', color: '#fff', padding: '10px 14px' }}
-                labelStyle={{ color: 'rgba(255,255,255,0.5)', marginBottom: '4px' }}
-                formatter={(val) => [`$${val} UP`, 'Reward']}
-              />
-              <Bar dataKey="reward" fill="url(#barGrad)" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <h2 className="text-xs font-medium text-white/40 uppercase tracking-wider">Daily Rewards</h2>
+            <p className="text-[10px] text-white/30 uppercase tracking-[0.18em]">Brush to zoom</p>
+          </div>
+          <div className="overflow-x-auto pb-1" style={{ scrollbarWidth: 'thin' }}>
+            <div style={{ minWidth: `${dailyRewardChartMinWidth}px` }}>
+              <ResponsiveContainer width="100%" height={310}>
+                <BarChart data={chartData} margin={{ top: 8, right: 12, left: -12, bottom: 28 }}>
+                  <defs>
+                    <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#818cf8" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0.6} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}
+                    stroke="rgba(255,255,255,0.06)"
+                    minTickGap={26}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: 'rgba(255,255,255,0.3)', fontFamily: 'monospace' }}
+                    stroke="rgba(255,255,255,0.06)"
+                    tickFormatter={(value) => `$${value}`}
+                  />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+                    contentStyle={{ background: 'rgba(10,10,26,0.9)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', fontSize: '13px', color: '#fff', padding: '10px 14px' }}
+                    labelStyle={{ color: 'rgba(255,255,255,0.5)', marginBottom: '4px' }}
+                    formatter={(val) => [`$${val} UP`, 'Reward']}
+                  />
+                  <Bar dataKey="reward" fill="url(#barGrad)" radius={[6, 6, 0, 0]} maxBarSize={18} />
+                  <Brush
+                    dataKey="date"
+                    height={24}
+                    travellerWidth={10}
+                    stroke="rgba(129,140,248,0.65)"
+                    fill="rgba(129,140,248,0.08)"
+                    startIndex={dailyRewardBrushStartIndex}
+                    endIndex={chartData.length - 1}
+                    tickFormatter={() => ''}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <p className="text-[11px] text-white/32 mt-3">
+            Drag the brush handles to zoom into a smaller window, or scroll sideways when the visible range is wider than the card.
+          </p>
         </div>
       )}
 
