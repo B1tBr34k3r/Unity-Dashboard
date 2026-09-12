@@ -2,6 +2,8 @@ import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar, Smartphone } from 'lucide-react';
 import { createElement, useState } from 'react';
 
+const unityIconUrl = `${import.meta.env.BASE_URL}unity-icon.png`;
+
 const primaryLinks = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
@@ -68,7 +70,7 @@ export default function Sidebar({ api }) {
         {/* Logo */}
         <div className="p-5 pb-4">
           <div className="flex items-center gap-3">
-            <img src="/unity-icon.png" alt="Unity" className="w-9 h-9 rounded-xl shadow-lg shadow-accent/25" />
+            <img src={unityIconUrl} alt="Unity" className="w-9 h-9 rounded-xl shadow-lg shadow-accent/25" />
             <div>
               <span className="text-gradient text-sm font-bold block leading-tight">Unity Nodes</span>
               <span className="text-[10px] text-white/25">Dashboard</span>

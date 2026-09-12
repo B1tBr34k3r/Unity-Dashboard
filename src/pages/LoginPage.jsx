@@ -3,6 +3,8 @@ import { sendOtp, verifyOtp, loginWithToken, getUser } from '../data/apiAdapter'
 import toast from 'react-hot-toast';
 import { Mail, KeyRound, ChevronRight } from 'lucide-react';
 
+const unityIconUrl = `${import.meta.env.BASE_URL}unity-icon.png`;
+
 export default function LoginPage({ onLogin }) {
   const [step, setStep] = useState('email');
   const [email, setEmail] = useState('');
@@ -66,7 +68,7 @@ export default function LoginPage({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center px-4 relative z-10">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <img src="/unity-icon.png" alt="Unity" className="w-16 h-16 rounded-2xl mx-auto mb-5 shadow-lg shadow-accent/30" />
+          <img src={unityIconUrl} alt="Unity" className="w-16 h-16 rounded-2xl mx-auto mb-5 shadow-lg shadow-accent/30" />
           <h1 className="text-3xl font-bold text-gradient">Unity Nodes</h1>
           <p className="text-sm text-white/40 mt-2">Sign in with your Unity Edge account</p>
         </div>
