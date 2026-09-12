@@ -412,7 +412,8 @@ export default function LicenseListPage({ api }) {
 
     const detailPath = `/licenses/${encodeURIComponent(licenseId)}`;
     if (event.ctrlKey || event.metaKey) {
-      const absoluteUrl = `${window.location.origin}${detailPath}`;
+      const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+      const absoluteUrl = `${window.location.origin}${basePath}${detailPath}`;
       window.open(absoluteUrl, '_blank', 'noopener');
       return;
     }
