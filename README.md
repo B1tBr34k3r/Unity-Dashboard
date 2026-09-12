@@ -86,13 +86,18 @@ npm run preview
 npm run lint
 ```
 
-## Local-Only Use
+## Host on GitHub Pages
 
-This repo is currently set up for local use on your PC.
+The repository includes a GitHub Actions workflow in `.github/workflows/deploy.yml`. To publish it:
 
-- Use `npm run dev` while working on the app.
-- Use `npm run build` and `npm run preview` if you want to test the production build locally.
-- Because the app uses `BrowserRouter`, any future static hosting setup would need an SPA fallback or rewrite rule.
+1. Push the repository to GitHub.
+2. In the repository, open **Settings > Secrets and variables > Actions > Variables** and add `VITE_SUPABASE_ANON_KEY` with the Unity Edge anon key.
+3. Open **Settings > Pages** and set **Source** to **GitHub Actions**.
+4. Push to `main`, or run the **Deploy to GitHub Pages** workflow from the **Actions** tab.
+
+The deployed site will be available at `https://<github-user>.github.io/Unity-Dashboard/`. The workflow builds the app with the repository base path and creates an SPA fallback for the app's client-side routes.
+
+For local development, use `npm run dev`. To test the production build locally, use `npm run build` and `npm run preview`.
 
 ## Local Persistence
 

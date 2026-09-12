@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar } from 'lucide-react';
-import { useState } from 'react';
+import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar, Smartphone } from 'lucide-react';
+import { createElement, useState } from 'react';
 
 const primaryLinks = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -11,13 +11,14 @@ const primaryLinks = [
 ];
 
 const insightLinks = [
+  { to: '/phone-earnings', icon: Smartphone, label: 'Phone Earnings' },
   { to: '/daily-changes', icon: Calendar, label: 'Daily Changes' },
 ];
 
 export default function Sidebar({ api }) {
   const [open, setOpen] = useState(false);
 
-  const renderLink = ({ to, icon: Icon, label }) => (
+  const renderLink = ({ to, icon, label }) => (
     <NavLink
       key={to}
       to={to}
@@ -31,7 +32,7 @@ export default function Sidebar({ api }) {
       }
       end
     >
-      <Icon size={17} strokeWidth={1.8} />
+      {createElement(icon, { size: 17, strokeWidth: 1.8 })}
       {label}
     </NavLink>
   );

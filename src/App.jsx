@@ -10,6 +10,8 @@ import { useNavigate } from 'react-router-dom';
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DailyChangesPage = lazy(() => import('./pages/DailyChangesPage'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const PhoneEarningsPage = lazy(() => import('./pages/PhoneEarningsPage'));
+const PhoneEarningsDetailPage = lazy(() => import('./pages/PhoneEarningsDetailPage'));
 const LicenseListPage = lazy(() => import('./pages/LicenseListPage'));
 const LicenseDetailPage = lazy(() => import('./pages/LicenseDetailPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -49,6 +51,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<DashboardPage api={api} />} />
                 <Route path="/daily-changes" element={<DailyChangesPage api={api} />} />
+                <Route path="/phone-earnings" element={<PhoneEarningsPage api={api} />} />
+                <Route path="/phone-earnings/:phoneName" element={<PhoneEarningsDetailPage api={api} />} />
                 <Route path="/analytics" element={<AnalyticsPage api={api} />} />
                 <Route path="/licenses" element={<Suspense fallback={<LicenseListSkeleton />}><LicenseListPage api={api} /></Suspense>} />
                 <Route path="/licenses/:id" element={<Suspense fallback={<LicenseDetailSkeleton />}><LicenseDetailPage api={api} /></Suspense>} />
