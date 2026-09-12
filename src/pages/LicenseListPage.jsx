@@ -412,7 +412,10 @@ export default function LicenseListPage({ api }) {
 
     const detailPath = `/licenses/${encodeURIComponent(licenseId)}`;
     if (event.ctrlKey || event.metaKey) {
-      const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+      const configuredBasePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+      const basePath = window.location.hostname.endsWith('github.io')
+        ? '/Unity-Dashboard'
+        : configuredBasePath;
       const absoluteUrl = `${window.location.origin}${basePath}${detailPath}`;
       window.open(absoluteUrl, '_blank', 'noopener');
       return;
