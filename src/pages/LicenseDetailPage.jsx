@@ -2,6 +2,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Copy, Pencil, Check, X } from 'lucide-react';
 import TrendCandleBar from '../components/common/TrendCandleBar';
+import TimelineNavigator from '../components/common/TimelineNavigator';
 import HoverRevealText from '../components/common/HoverRevealText';
 import { useDeviceCombinations } from '../hooks/useDeviceCombinations';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
@@ -708,36 +709,15 @@ export default function LicenseDetailPage({ api }) {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-3 py-3 mt-4">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">Timeline Navigator</p>
-              <p className="text-[10px] text-white/26 uppercase tracking-[0.18em]">Drag to adjust focus</p>
-            </div>
-            <ResponsiveContainer width="100%" height={84}>
-              <ComposedChart data={chartData} margin={{ top: 6, right: 10, left: -12, bottom: 0 }} key={`license-reward-navigator-${chartData.length}`}>
-                <defs>
-                  <linearGradient id="dailyRewardNavigator" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.06} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="date" hide />
-                <YAxis hide domain={[0, 'dataMax']} />
-                <Area type="monotone" dataKey="reward" stroke="rgba(129,140,248,0.45)" strokeWidth={1.2} fill="url(#dailyRewardNavigator)" dot={false} activeDot={false} />
-                <Brush
-                  dataKey="date"
-                  height={24}
-                  travellerWidth={10}
-                  stroke="rgba(129,140,248,0.72)"
-                  fill="rgba(129,140,248,0.10)"
-                  startIndex={dailyRewardBrushRange.startIndex}
-                  endIndex={dailyRewardBrushRange.endIndex}
-                  onChange={handleDailyRewardBrushChange}
-                  tickFormatter={() => ''}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+          <TimelineNavigator
+            data={chartData}
+            valueKey="reward"
+            labelKey="date"
+            range={dailyRewardBrushRange}
+            onChange={handleDailyRewardBrushChange}
+            onResetMonth={() => setSelectedChartMonthKey('all')}
+            defaultWindow={DAILY_REWARD_DEFAULT_WINDOW}
+          />
           <p className="text-[11px] text-white/32 mt-3">
             Same-day rewards are merged into one daily total. Select a month card to jump straight to that section, then use the navigator below to fine-tune the visible window.
           </p>

@@ -26,6 +26,7 @@ import {
 } from 'recharts';
 import { RefreshCw, Wallet, TrendingUp, Clock, Users } from 'lucide-react';
 import TrendCandleBar from '../components/common/TrendCandleBar';
+import TimelineNavigator from '../components/common/TimelineNavigator';
 import StatCard from '../components/dashboard/StatCard';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
@@ -1131,36 +1132,15 @@ export default function AnalyticsPage({ api }) {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-3 py-3 mt-4">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <p className="text-[10px] uppercase tracking-[0.18em] text-white/30">Timeline Navigator</p>
-                  <p className="text-[10px] text-white/26 uppercase tracking-[0.18em]">Drag to adjust focus</p>
-                </div>
-                <ResponsiveContainer width="100%" height={86}>
-                  <ComposedChart data={dailyTrendData} margin={{ top: 6, right: 10, left: -16, bottom: 0 }} key={`daily-trend-navigator-${dailyTrendData.length}`}>
-                    <defs>
-                      <linearGradient id="combinedDailyNavigator" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
-                        <stop offset="100%" stopColor="#6366f1" stopOpacity={0.06} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="label" hide />
-                    <YAxis hide domain={[0, 'dataMax']} />
-                    <Area type="monotone" dataKey="amount" stroke="rgba(129,140,248,0.45)" strokeWidth={1.2} fill="url(#combinedDailyNavigator)" dot={false} activeDot={false} />
-                    <Brush
-                      dataKey="label"
-                      height={24}
-                      travellerWidth={10}
-                      stroke="rgba(129,140,248,0.72)"
-                      fill="rgba(129,140,248,0.10)"
-                      startIndex={dailyTrendBrushRange.startIndex}
-                      endIndex={dailyTrendBrushRange.endIndex}
-                      onChange={handleDailyTrendBrushChange}
-                      tickFormatter={() => ''}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
+              <TimelineNavigator
+                data={dailyTrendData}
+                valueKey="amount"
+                labelKey="label"
+                range={dailyTrendBrushRange}
+                onChange={handleDailyTrendBrushChange}
+                onResetMonth={() => setSelectedTrendMonthKey('all')}
+                defaultWindow={COMBINED_EARNINGS_DEFAULT_WINDOW}
+              />
 
               <div className="flex flex-wrap items-center gap-4 mt-4 text-[10px] text-white/35 uppercase tracking-[0.18em]">
                 <div className="flex items-center gap-2">
