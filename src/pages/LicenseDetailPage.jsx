@@ -179,6 +179,10 @@ export default function LicenseDetailPage({ api }) {
       return null;
     }
 
+    if (visibleDailyRewardData.length === 1) {
+      return visibleDailyRewardData[0].date;
+    }
+
     return `${visibleDailyRewardData[0].date} - ${visibleDailyRewardData[visibleDailyRewardData.length - 1].date}`;
   }, [visibleDailyRewardData]);
 
@@ -269,7 +273,8 @@ export default function LicenseDetailPage({ api }) {
       startIndex: dailyRewardBrushStartIndex,
       endIndex: chartData.length - 1,
     });
-  }, [chartData.length, dailyRewardBrushStartIndex, selectedChartMonth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartData.length, dailyRewardBrushStartIndex]);
 
   const licenseInfoById = useMemo(
     () => Object.fromEntries((licenseMetadata || []).map((license) => [license.id, license])),
@@ -364,16 +369,23 @@ export default function LicenseDetailPage({ api }) {
       return;
     }
 
-    const nextStartIndex = typeof startIndex === 'number' ? startIndex : 0;
-    const nextEndIndex = typeof endIndex === 'number' ? endIndex : chartData.length - 1;
+    const rawStart = typeof startIndex === 'number' ? startIndex : 0;
+    const rawEnd = typeof endIndex === 'number' ? endIndex : chartData.length - 1;
+    const nextStartIndex = Math.max(0, Math.min(rawStart, rawEnd, chartData.length - 1));
+    const nextEndIndex = Math.min(chartData.length - 1, Math.max(rawStart, rawEnd, 0));
 
-    if (selectedChartMonth && (nextStartIndex !== selectedChartMonth.startIndex || nextEndIndex !== selectedChartMonth.endIndex)) {
+    if (selectedChartMonthKey !== 'all') {
       setSelectedChartMonthKey('all');
     }
 
-    setDailyRewardBrushRange({
-      startIndex: nextStartIndex,
-      endIndex: nextEndIndex,
+    setDailyRewardBrushRange((prev) => {
+      if (prev.startIndex === nextStartIndex && prev.endIndex === nextEndIndex) {
+        return prev;
+      }
+      return {
+        startIndex: nextStartIndex,
+        endIndex: nextEndIndex,
+      };
     });
   };
 
@@ -702,7 +714,7 @@ export default function LicenseDetailPage({ api }) {
               <p className="text-[10px] text-white/26 uppercase tracking-[0.18em]">Drag to adjust focus</p>
             </div>
             <ResponsiveContainer width="100%" height={84}>
-              <ComposedChart data={chartData} margin={{ top: 6, right: 10, left: -12, bottom: 0 }} key={`${selectedChartMonthKey}-${chartData.length}`}>
+              <ComposedChart data={chartData} margin={{ top: 6, right: 10, left: -12, bottom: 0 }} key={`license-reward-navigator-${chartData.length}`}>
                 <defs>
                   <linearGradient id="dailyRewardNavigator" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />

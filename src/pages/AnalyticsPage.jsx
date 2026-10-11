@@ -586,6 +586,10 @@ export default function AnalyticsPage({ api }) {
       return null;
     }
 
+    if (visibleDailyTrendData.length === 1) {
+      return visibleDailyTrendData[0].label;
+    }
+
     return `${visibleDailyTrendData[0].label} - ${visibleDailyTrendData[visibleDailyTrendData.length - 1].label}`;
   }, [visibleDailyTrendData]);
 
@@ -677,7 +681,8 @@ export default function AnalyticsPage({ api }) {
       startIndex: dailyTrendBrushStartIndex,
       endIndex: dailyTrendData.length - 1,
     });
-  }, [dailyTrendBrushStartIndex, dailyTrendData.length, selectedTrendMonth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dailyTrendBrushStartIndex, dailyTrendData.length]);
 
   const statusMixData = useMemo(() => {
     const total = licenseAnalytics.length || 1;
@@ -861,16 +866,23 @@ export default function AnalyticsPage({ api }) {
       return;
     }
 
-    const nextStartIndex = typeof startIndex === 'number' ? startIndex : 0;
-    const nextEndIndex = typeof endIndex === 'number' ? endIndex : dailyTrendData.length - 1;
+    const rawStart = typeof startIndex === 'number' ? startIndex : 0;
+    const rawEnd = typeof endIndex === 'number' ? endIndex : dailyTrendData.length - 1;
+    const nextStartIndex = Math.max(0, Math.min(rawStart, rawEnd, dailyTrendData.length - 1));
+    const nextEndIndex = Math.min(dailyTrendData.length - 1, Math.max(rawStart, rawEnd, 0));
 
-    if (selectedTrendMonth && (nextStartIndex !== selectedTrendMonth.startIndex || nextEndIndex !== selectedTrendMonth.endIndex)) {
+    if (selectedTrendMonthKey !== 'all') {
       setSelectedTrendMonthKey('all');
     }
 
-    setDailyTrendBrushRange({
-      startIndex: nextStartIndex,
-      endIndex: nextEndIndex,
+    setDailyTrendBrushRange((prev) => {
+      if (prev.startIndex === nextStartIndex && prev.endIndex === nextEndIndex) {
+        return prev;
+      }
+      return {
+        startIndex: nextStartIndex,
+        endIndex: nextEndIndex,
+      };
     });
   };
 
@@ -1125,7 +1137,7 @@ export default function AnalyticsPage({ api }) {
                   <p className="text-[10px] text-white/26 uppercase tracking-[0.18em]">Drag to adjust focus</p>
                 </div>
                 <ResponsiveContainer width="100%" height={86}>
-                  <ComposedChart data={dailyTrendData} margin={{ top: 6, right: 10, left: -16, bottom: 0 }} key={`${selectedTrendMonthKey}-${dailyTrendData.length}`}>
+                  <ComposedChart data={dailyTrendData} margin={{ top: 6, right: 10, left: -16, bottom: 0 }} key={`daily-trend-navigator-${dailyTrendData.length}`}>
                     <defs>
                       <linearGradient id="combinedDailyNavigator" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#6366f1" stopOpacity={0.45} />
