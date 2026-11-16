@@ -236,7 +236,7 @@ export function useApi() {
   const fetchCoreDashboardData = useCallback(() => Promise.allSettled([
     getRewardsBalance(),
     getLicenses(),
-    getRewardsAllocations(),
+    getRewardsAllocations({ skip: 0, take: 500 }),
     getRewardsAllocationsSummary(30),
   ]), []);
 
@@ -267,9 +267,10 @@ export function useApi() {
       setUser(resolvedUser);
 
       const cachedOverview = readAccountOverviewCache(resolvedUser.id);
+      const hadCache = Boolean(cachedOverview && hydrateCachedOverview(resolvedUser, cachedOverview));
 
-      if (!manual && hydrateCachedOverview(resolvedUser, cachedOverview)) {
-        return;
+      if (hadCache && !manual) {
+        setIsLoading(false);
       }
 
       const [balanceData, licensesData, allocData, summaryData] = await fetchCoreDashboardData();

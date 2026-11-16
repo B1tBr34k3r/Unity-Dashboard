@@ -126,3 +126,28 @@ export function formatIncentiveType(type, description) {
     .join(' ') + ' Incentive';
 }
 
+/**
+ * Calculates the weekly Tuesday unlock date for an allocation based on Unetwork's distribution schedule.
+ * Cutoff is every Tuesday at 00:00 UTC. Allocations unlock on the Tuesday 3 to 9 days after receipt.
+ */
+export function getEstimatedUnlockDate(dateValue) {
+  if (!dateValue) return null;
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const unlock = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0));
+  const day = unlock.getUTCDay();
+
+  let daysToAdd = 7;
+  if (day === 0) daysToAdd = 9;
+  else if (day === 1) daysToAdd = 8;
+  else if (day === 2) daysToAdd = 7;
+  else if (day === 3) daysToAdd = 6;
+  else if (day === 4) daysToAdd = 5;
+  else if (day === 5) daysToAdd = 4;
+  else if (day === 6) daysToAdd = 3;
+
+  unlock.setUTCDate(unlock.getUTCDate() + daysToAdd);
+  return unlock.toISOString();
+}
+
