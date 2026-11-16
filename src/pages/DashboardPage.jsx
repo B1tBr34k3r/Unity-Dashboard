@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import StatCard from '../components/dashboard/StatCard';
 import MonthlyRewardsChart from '../components/dashboard/MonthlyRewardsChart';
@@ -8,7 +8,7 @@ import { useOperatorTags } from '../hooks/useOperatorTags';
 import { useLicenseLabels } from '../hooks/useLicenseLabels';
 import { useLicensePresetTags } from '../hooks/useLicensePresetTags';
 import { aggregateByRewardMonth, formatRewardDayLabel, formatRewardMonthLabel, getRewardDayKey, getRewardMonthKey, microsToUsd } from '../utils/formatters';
-import { Wallet, TrendingUp, Calendar, Clock, RefreshCw, Users, ArrowUpRight } from 'lucide-react';
+import { Wallet, TrendingUp, Calendar, Clock, RefreshCw, Users, ArrowUpRight, ChevronRight } from 'lucide-react';
 import { DashboardSkeleton } from '../components/common/Skeleton';
 import DateRangeFilter, { useDateRangeFilter } from '../components/common/DateRangeFilter';
 import { buildCloneIndexMap, getLicenseBackendName, getLicenseDisplayName } from '../utils/licenseDisplay';
@@ -115,16 +115,16 @@ export default function DashboardPage({ api }) {
     [presetTags, licenseInfoById, cloneTagOrder, workTagOrder, deviceAliasLookup]
   );
 
-  const getDisplayName = (licenseId) => getLicenseDisplayName({
+  const getDisplayName = useCallback((licenseId) => getLicenseDisplayName({
     customLabel: getLabel(licenseId),
     backendName: getLicenseBackendName(licenseInfoById[licenseId], deviceAliasLookup),
     presetTag: getPresetTag(licenseId),
     tagIndex: tagIndexById[licenseId] || null,
-  }) || `License ${licenseId}`;
+  }) || `License ${licenseId}`, [getLabel, licenseInfoById, deviceAliasLookup, getPresetTag, tagIndexById]);
 
   const dailyInsight = useMemo(
     () => buildDailyInsight(allocations, getDisplayName),
-    [allocations, getLabel, getPresetTag, tagIndexById, licenseInfoById, deviceAliasLookup]
+    [allocations, getDisplayName]
   );
 
   const monthData = useMemo(() => {
@@ -265,7 +265,7 @@ export default function DashboardPage({ api }) {
           icon={Wallet}
           label="Available Balance"
           value={balance !== null ? `$${microsToUsd(balance)}` : '—'}
-          sub="UP"
+          sub={summaryData?.pendingAmountMicros ? `+$${microsToUsd(summaryData.pendingAmountMicros)} Pending` : 'UP'}
           color="text-success"
         />
         <StatCard
@@ -290,6 +290,32 @@ export default function DashboardPage({ api }) {
           color="text-white/50"
         />
       </div>
+
+      {summaryData?.pendingAmountMicros > 0 && (
+        <Link
+          to="/network-incentives"
+          className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl border border-amber-500/20 bg-amber-500/[0.05] hover:bg-amber-500/[0.09] transition-all group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center text-amber-400 shrink-0">
+              <Clock size={16} />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-semibold text-white flex flex-wrap items-center gap-2">
+                <span>Pending Network Incentives:</span>
+                <span className="text-amber-300 font-mono font-bold">+${microsToUsd(summaryData.pendingAmountMicros)} UP</span>
+              </p>
+              <p className="text-[11px] text-white/40">
+                Incentives currently maturing in lockup. Click to view segregation &amp; unlock schedule &rarr;
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-amber-300/80 group-hover:text-amber-300 font-medium shrink-0">
+            <span className="hidden sm:inline">View Incentives</span>
+            <ChevronRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+          </div>
+        </Link>
+      )}
 
       {dailyInsight ? (
         <Link to="/daily-changes" className="block group">

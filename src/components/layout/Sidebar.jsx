@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar, Smartphone } from 'lucide-react';
+import { LayoutDashboard, BarChart3, List, Wallet, Settings, LogOut, Menu, X, Calendar, Smartphone, Coins } from 'lucide-react';
 import { createElement, useState } from 'react';
 
 const unityIconUrl = `${import.meta.env.BASE_URL}unity-icon.png`;
@@ -13,6 +13,7 @@ const primaryLinks = [
 ];
 
 const insightLinks = [
+  { to: '/network-incentives', icon: Coins, label: 'Network Incentives' },
   { to: '/phone-earnings', icon: Smartphone, label: 'Phone Earnings' },
   { to: '/daily-changes', icon: Calendar, label: 'Daily Changes' },
 ];

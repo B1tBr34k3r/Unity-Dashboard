@@ -368,9 +368,15 @@ export function useApi() {
     setAuthed(true);
   };
 
+  const summaryData = Array.isArray(summary) && summary.length > 0 ? summary[0] : (summary && typeof summary === 'object' && !Array.isArray(summary) ? summary : null);
+  const pendingBalance = summaryData?.pendingAmountMicros ?? null;
+  const totalEarned = summaryData?.totalAmountMicros ?? null;
+
   return {
     user,
     balance,
+    pendingBalance,
+    totalEarned,
     licenses,
     allocations,
     summary,

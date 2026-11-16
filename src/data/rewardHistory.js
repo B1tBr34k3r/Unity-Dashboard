@@ -33,7 +33,7 @@ function compactRewardAllocation(allocation) {
     return null;
   }
 
-  const completedAt = normalizeCompletedAt(allocation.completedAt);
+  const completedAt = normalizeCompletedAt(allocation.completedAt || allocation.createdAt);
   const amountMicros = Number(allocation.amountMicros);
 
   if (!completedAt || !Number.isFinite(amountMicros)) {
@@ -45,6 +45,9 @@ function compactRewardAllocation(allocation) {
     licenseId: String(allocation.licenseId),
     amountMicros: Math.round(amountMicros),
     completedAt,
+    availableAt: allocation.availableAt ? normalizeCompletedAt(allocation.availableAt) : null,
+    type: allocation.type ? String(allocation.type) : 'license_operator',
+    description: allocation.description ? String(allocation.description) : null,
   };
 }
 
@@ -55,7 +58,18 @@ export function mergeRewardAllocations(...sources) {
     const compact = compactRewardAllocation(allocation);
 
     if (compact) {
-      allocationMap.set(compact.id, compact);
+      const existing = allocationMap.get(compact.id);
+      if (existing) {
+        allocationMap.set(compact.id, {
+          ...existing,
+          ...compact,
+          availableAt: compact.availableAt || existing.availableAt || null,
+          type: compact.type || existing.type || 'license_operator',
+          description: compact.description || existing.description || null,
+        });
+      } else {
+        allocationMap.set(compact.id, compact);
+      }
     }
   });
 
